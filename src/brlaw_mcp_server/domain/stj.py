@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Self, override
 
 from patchright.async_api import TimeoutError
 
+from brlaw_mcp_server.cloudflare import is_cloudflare_challenge, solve_cloudflare_challenge
 from brlaw_mcp_server.domain.base import BaseLegalPrecedent
 
 if TYPE_CHECKING:
@@ -56,6 +57,15 @@ class StjLegalPrecedent(BaseLegalPrecedent):
         )
 
         await browser.goto("https://scon.stj.jus.br/SCON/")
+
+        if await is_cloudflare_challenge(browser):
+            _LOGGER.info("Cloudflare challenge detected on STJ, attempting to solve")
+            solved = await solve_cloudflare_challenge(browser)
+            if not solved:
+                raise RuntimeError(
+                    "Could not bypass Cloudflare challenge on STJ website"
+                )
+            _LOGGER.info("Cloudflare challenge solved successfully")
 
         await browser.locator("#idMostrarPesquisaAvancada").click()
 

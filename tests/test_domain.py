@@ -5,6 +5,7 @@ import pytest
 from brlaw_mcp_server.domain.base import BaseLegalPrecedent
 from brlaw_mcp_server.domain.stf import StfLegalPrecedent
 from brlaw_mcp_server.domain.stj import StjLegalPrecedent
+from brlaw_mcp_server.domain.tjes import TjesLegalPrecedent
 from brlaw_mcp_server.domain.tst import TstLegalPrecedent
 from brlaw_mcp_server.utils import browser_factory
 
@@ -25,7 +26,7 @@ from brlaw_mcp_server.utils import browser_factory
     ],
 )
 @pytest.mark.parametrize(
-    "class_", [StjLegalPrecedent, TstLegalPrecedent, StfLegalPrecedent]
+    "class_", [StjLegalPrecedent, TstLegalPrecedent, StfLegalPrecedent, TjesLegalPrecedent]
 )
 async def test_research_legal_precedents(
     summary: str,

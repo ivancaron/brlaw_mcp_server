@@ -11,8 +11,9 @@ from pydantic import BaseModel, Field
 from brlaw_mcp_server.domain.base import BaseLegalPrecedent
 from brlaw_mcp_server.domain.stf import StfLegalPrecedent
 from brlaw_mcp_server.domain.stj import StjLegalPrecedent
+from brlaw_mcp_server.domain.tjes import TjesLegalPrecedent
 from brlaw_mcp_server.domain.tst import TstLegalPrecedent
-from brlaw_mcp_server.utils import browser_factory
+from brlaw_mcp_server.utils import browser_factory, stealth_browser_factory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -338,6 +339,56 @@ class StfLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição dos precedentes judiciais do Tribunal de Justiça do Espírito Santo (TJES) que satisfaçam os critérios passados.
+
+    O TJES é o órgão de cúpula do Poder Judiciário estadual do Espírito Santo, responsável por julgar
+    recursos e ações originárias no âmbito da justiça comum estadual.
+
+    Atua em matéria cível, criminal, família, fazenda pública, entre outras, sendo a última instância
+    recursal estadual antes dos tribunais superiores (STJ e STF).
+
+    Os resultados incluem acórdãos colegiados do 2º grau (Câmaras Cíveis, Câmaras Criminais,
+    Tribunal Pleno e Turmas Recursais), com ementas e metadados estruturados."""
+
+    summary: str = Field(
+        title="Ementa",
+        description=textwrap.dedent("""
+        Critérios que serão buscados nas decisões do TJES.
+
+        Operadores de busca suportados:
+
+        ## Busca exata
+        Use aspas para buscar frases exatas.
+
+        EXEMPLO: "dano moral"
+
+        ## Operadores lógicos
+        ### `AND`
+        Todos os termos devem aparecer no documento.
+
+        EXEMPLO: contrato AND rescisão
+
+        ### `OR`
+        Ao menos um dos termos deve aparecer no documento.
+
+        EXEMPLO: dano OR prejuízo
+
+        ## Curinga
+        ### `*`
+        Substitui parte de uma palavra para buscar variações.
+
+        EXEMPLO: trabalh* (retorna trabalho, trabalhista, trabalhador, etc.)"""),
+        min_length=1,
+        examples=[
+            '"dano moral"',
+            "contrato AND rescisão",
+            "habeas corpus AND prisão preventiva",
+            "trabalh* AND vínculo",
+        ],
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -345,7 +396,8 @@ _TOOLS_AND_MODELS: Final[
             type[BaseLegalPrecedent],
             type[StjLegalPrecedentsRequest]
             | type[TstLegalPrecedentsRequest]
-            | type[StfLegalPrecedentsRequest],
+            | type[StfLegalPrecedentsRequest]
+            | type[TjesLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -362,6 +414,7 @@ _TOOLS_AND_MODELS: Final[
         (StjLegalPrecedentsRequest, StjLegalPrecedent),
         (TstLegalPrecedentsRequest, TstLegalPrecedent),
         (StfLegalPrecedentsRequest, StfLegalPrecedent),
+        (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
     ]
 ]
 
@@ -389,8 +442,12 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
+    factory = (
+        stealth_browser_factory if domain_model is StjLegalPrecedent else browser_factory
+    )
+
     async with (
-        browser_factory(headless=True) as browser,
+        factory(headless=True) as browser,
         await browser.new_page() as page,
     ):
         try:
