@@ -42,7 +42,7 @@ _formatter = _Formatter("%(asctime)s %(name)s %(levelname)s %(message)s")
 # To avoid losing important information, logs with WARNING level and above are also written to a
 # persistent file.
 _file_handler = logging.FileHandler(Path(__file__).parent.parent.parent / "mcp.log")
-_file_handler.setLevel(logging.WARNING)
+_file_handler.setLevel(logging.INFO)
 
 _stream_handler = logging.StreamHandler()
 

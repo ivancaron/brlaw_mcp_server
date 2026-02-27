@@ -446,19 +446,25 @@ async def call_tool(
         stealth_browser_factory if domain_model is StjLegalPrecedent else browser_factory
     )
 
-    async with (
-        factory(headless=True) as browser,
-        await browser.new_page() as page,
-    ):
-        try:
+    try:
+        async with (
+            factory(headless=True) as browser,
+            await browser.new_page() as page,
+        ):
             precedents = await method(
                 page,
                 summary_search_prompt=request.summary,
                 desired_page=request.page,
             )
-        except Exception:
-            _LOGGER.exception("Error calling tool", extra={"tool_name": name})
-            raise
+    except Exception as exc:
+        _LOGGER.exception("Error calling tool", extra={"tool_name": name})
+        tribunal = name.replace("LegalPrecedentsRequest", "").upper()
+        return [
+            TextContent(
+                type="text",
+                text=f"[ERRO] {tribunal}: {exc}. Tente novamente com uma query diferente ou mais simples.",
+            )
+        ]
 
     return (
         [

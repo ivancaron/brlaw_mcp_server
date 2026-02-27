@@ -1,4 +1,5 @@
 import logging
+import re
 from typing import TYPE_CHECKING, Any, Self, override
 from urllib.parse import quote_plus
 
@@ -13,6 +14,38 @@ _BASE_URL = "https://sistemas.tjes.jus.br/consulta-jurisprudencia"
 _API_URL = f"{_BASE_URL}/api/search"
 _PER_PAGE = 20
 _MIN_EMENTA_LENGTH = 30
+_MAX_QUOTED_TERMS_WITH_AND = 2
+
+_FETCH_JS = """async ([url, retryUrl]) => {
+    let resp = await fetch(url);
+    if (resp.status === 403 && retryUrl) {
+        resp = await fetch(retryUrl);
+    }
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return await resp.json();
+}"""
+
+
+def _sanitize_query(query: str) -> tuple[str, str | None]:
+    """Sanitize a query to avoid TJES WAF blocks.
+
+    Returns (primary_query, fallback_query_or_none).
+    The WAF blocks queries with 3+ quoted terms combined with AND.
+    """
+    quoted_terms = re.findall(r'"[^"]*"', query)
+
+    if len(quoted_terms) <= _MAX_QUOTED_TERMS_WITH_AND:
+        return query, None
+
+    _LOGGER.warning(
+        "TJES query has %d quoted terms (max %d with AND). Building fallback.",
+        len(quoted_terms),
+        _MAX_QUOTED_TERMS_WITH_AND,
+    )
+
+    # Fallback: remove all quotes so WAF doesn't block
+    fallback = re.sub(r'"([^"]*)"', r'\1', query)
+    return query, fallback
 
 
 class TjesLegalPrecedent(BaseLegalPrecedent):
@@ -66,24 +99,35 @@ class TjesLegalPrecedent(BaseLegalPrecedent):
 
         await browser.goto(f"{_BASE_URL}/", wait_until="networkidle")
 
-        encoded_query = quote_plus(summary_search_prompt)
-        api_url = (
+        primary_query, fallback_query = _sanitize_query(summary_search_prompt)
+
+        primary_url = (
             f"{_API_URL}?core=pje2g"
-            f"&q={encoded_query}"
+            f"&q={quote_plus(primary_query)}"
             f"&page={desired_page}"
             f"&per_page={_PER_PAGE}"
         )
 
-        _LOGGER.debug("Fetching TJES API: %s", api_url)
+        fallback_url: str | None = None
+        if fallback_query:
+            fallback_url = (
+                f"{_API_URL}?core=pje2g"
+                f"&q={quote_plus(fallback_query)}"
+                f"&page={desired_page}"
+                f"&per_page={_PER_PAGE}"
+            )
 
-        result: dict[str, Any] = await browser.evaluate(  # pyright: ignore[reportExplicitAny, reportAny]
-            """async (url) => {
-                const resp = await fetch(url);
-                if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-                return await resp.json();
-            }""",
-            api_url,
-        )
+        _LOGGER.debug("Fetching TJES API: %s", primary_url)
+        if fallback_url:
+            _LOGGER.debug("Fallback URL prepared: %s", fallback_url)
+
+        try:
+            result: dict[str, Any] = await browser.evaluate(  # pyright: ignore[reportExplicitAny, reportAny]
+                _FETCH_JS, [primary_url, fallback_url]
+            )
+        except Exception as exc:
+            _LOGGER.error("TJES API request failed: %s", exc)
+            return []
 
         docs: list[dict[str, Any]] = result.get("docs", [])  # pyright: ignore[reportExplicitAny, reportAny]
         total: int = result.get("total", 0)  # pyright: ignore[reportAny]
