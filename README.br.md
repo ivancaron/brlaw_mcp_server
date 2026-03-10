@@ -6,17 +6,31 @@ Um servidor MCP (Model Context Protocol) para pesquisa sobre direito brasileiro 
 de IA usando fontes oficiais.
 
 ## Prefácio
-Este servidor capacita modelos com capacidades de scraping, facilitando assim a pesquisa para 
+Este servidor capacita modelos com capacidades de scraping, facilitando assim a pesquisa para
 qualquer pessoa legitimamente interessada em questões jurídicas brasileiras.
 
-Esta facilidade vem com um preço: o risco de sobrecarregar os servidores das fontes oficiais se 
+Esta facilidade vem com um preço: o risco de sobrecarregar os servidores das fontes oficiais se
 mal utilizada. Por favor, mantenha a carga nas fontes em uma quantidade razoável.
+
+## Arquitetura
+
+Cada tribunal utiliza o método de acesso mais confiável disponível:
+
+| Tribunal | Método | Endpoint |
+|----------|--------|----------|
+| **STJ** | HTTP POST direto | `processo.stj.jus.br/SCON/pesquisar.jsp` |
+| **STF** | Browser headless (Chromium) | `portal.stf.jus.br` |
+| **TST** | Browser headless (Chromium) | `jurisprudencia.tst.jus.br` |
+
+O endpoint do STJ (`processo.stj.jus.br`) serve os mesmos resultados de pesquisa SCON que o
+`scon.stj.jus.br`, porém sem proteção Cloudflare Turnstile, permitindo acesso rápido e confiável
+via requisições HTTP diretas com codificação ISO-8859-1 adequada.
 
 ## Requisitos
 
 - git
 - uv (recomendado) ou Python >= 3.12
-- Google Chrome
+- Google Chrome (necessário para STF e TST; não é necessário para STJ)
 
 ## Como usar
 
@@ -49,12 +63,18 @@ uv run patchright install
 
 ### Ferramentas Disponíveis
 
-- `StjLegalPrecedentsRequest`: Pesquisa precedentes judiciais feitos pelo Superior Tribunal de 
-  Justiça (STJ) que atendam aos critérios especificados.
-- `TstLegalPrecedentsRequest`: Pesquisa precedentes judiciais feitos pelo Tribunal Superior do 
-  Trabalho (TST) que atendam aos critérios especificados.
-- `StfLegalPrecedentsRequest`: Pesquisa precedentes judiciais feitos pelo Supremo Tribunal Federal 
-  (STF) que atendam aos critérios especificados.
+- `StjLegalPrecedentsRequest`: Pesquisa precedentes judiciais do Superior Tribunal de Justiça (STJ)
+  que atendam aos critérios especificados. Utiliza HTTP POST direto para acesso rápido e confiável.
+- `TstLegalPrecedentsRequest`: Pesquisa precedentes judiciais do Tribunal Superior do Trabalho (TST)
+  que atendam aos critérios especificados.
+- `StfLegalPrecedentsRequest`: Pesquisa precedentes judiciais do Supremo Tribunal Federal (STF)
+  que atendam aos critérios especificados.
+
+### Operadores de Busca
+
+Cada tribunal suporta operadores de busca específicos para consultas mais precisas. Consulte as
+descrições das ferramentas para a sintaxe detalhada (ex.: `e`, `ou`, `não`, `adj`, `prox`, `$`,
+`?` para STJ; `E`, `OU`, `NÃO`, `"..."`, `"..."~N`, `$`, `?` para STF).
 
 ## Desenvolvimento
 
