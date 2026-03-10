@@ -389,19 +389,34 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
-    async with (
-        browser_factory(headless=True) as browser,
-        await browser.new_page() as page,
-    ):
-        try:
+    # STJ uses direct HTTP (no browser needed); other courts use browser
+    try:
+        if domain_model is StjLegalPrecedent:
+            # STJ bypasses Cloudflare via processo.stj.jus.br HTTP POST
             precedents = await method(
-                page,
+                None,  # pyright: ignore[reportArgumentType] — browser not used
                 summary_search_prompt=request.summary,
                 desired_page=request.page,
             )
-        except Exception:
-            _LOGGER.exception("Error calling tool", extra={"tool_name": name})
-            raise
+        else:
+            async with (
+                browser_factory(headless=True) as browser,
+                await browser.new_page() as page,
+            ):
+                precedents = await method(
+                    page,
+                    summary_search_prompt=request.summary,
+                    desired_page=request.page,
+                )
+    except Exception as exc:
+        _LOGGER.exception("Error calling tool", extra={"tool_name": name})
+        tribunal = name.replace("LegalPrecedentsRequest", "").upper()
+        return [
+            TextContent(
+                type="text",
+                text=f"[ERRO] {tribunal}: {exc}. Tente novamente com uma query diferente ou mais simples.",
+            )
+        ]
 
     return (
         [
