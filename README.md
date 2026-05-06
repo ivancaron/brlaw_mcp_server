@@ -1,12 +1,12 @@
-# Brazilian Law Research MCP Server
+# Jurismcp — Brazilian Law Research MCP Server
 
 [🇧🇷 Leia em português](README.br.md)
 
 A MCP (Model Context Protocol) server for agent-driven research on Brazilian law using official 
 sources.
 
-<a href="https://glama.ai/mcp/servers/@pdmtt/brlaw_mcp_server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@pdmtt/brlaw_mcp_server/badge" alt="Brazilian Law Research Server MCP server" />
+<a href="https://glama.ai/mcp/servers/@pdmtt/jurismcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@pdmtt/jurismcp/badge" alt="Brazilian Law Research Server MCP server" />
 </a>
 
 ## Foreword
@@ -23,12 +23,17 @@ Each court uses the most reliable access method available:
 | Court | Method | Endpoint |
 |-------|--------|----------|
 | **STJ** | Direct HTTP POST | `processo.stj.jus.br/SCON/pesquisar.jsp` |
-| **STF** | Headless browser (Chromium) | `portal.stf.jus.br` |
+| **STF** | Headless browser (Chromium) | `jurisprudencia.stf.jus.br` |
 | **TST** | Headless browser (Chromium) | `jurisprudencia.tst.jus.br` |
+| **TJES** | Direct HTTP GET (REST API) | `sistemas.tjes.jus.br/consulta-jurisprudencia/api/search` |
 
 The STJ endpoint (`processo.stj.jus.br`) serves the same SCON search results as
 `scon.stj.jus.br` but without Cloudflare Turnstile protection, enabling fast and
 reliable access via direct HTTP requests with proper ISO-8859-1 form encoding.
+
+The TJES endpoint exposes a public JSON API that returns each ruling's full
+text (`acordao` field) on the same response as the summary, eliminating the
+need for an extra request to obtain the inteiro teor.
 
 ## Requirements
 
@@ -40,7 +45,7 @@ reliable access via direct HTTP requests with proper ISO-8859-1 form encoding.
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/pdmtt/brlaw_mcp_server.git
+git clone https://github.com/pdmtt/jurismcp.git
 ```
 
 2. Install the dependencies
@@ -52,11 +57,11 @@ uv run patchright install
 ```json
 {
   "mcpServers": {
-    "brlaw_mcp_server": {
+    "jurismcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "/<path>/brlaw_mcp_server",
+        "/<path>/jurismcp",
         "run",
         "serve"
       ]
@@ -73,12 +78,30 @@ uv run patchright install
   Brazil (TST) that meet the specified criteria.
 - `StfLegalPrecedentsRequest`: Research legal precedents made by the Supreme Court (STF) that meet
   the specified criteria.
+- `TjesLegalPrecedentsRequest`: Research legal precedents made by the Court of Justice of the State
+  of Espírito Santo (TJES). Uses TJES public REST API.
+
+### Response Fields
+
+Each tool returns a list of legal precedents. Beyond the canonical `summary` (ementa) field,
+results may also expose the following optional fields when the source court provides the data:
+
+| Field | Type | Populated by | Description |
+|-------|------|--------------|-------------|
+| `summary` | `str` | All | The ementa (mandatory). |
+| `full_text` | `str \| None` | TJES | Integral text of the decision (relatório + voto + dispositivo). The TJES REST API ships this on the same response as the summary, so no extra request is needed. |
+| `full_text_url` | `str \| None` | STJ, STF, TST | Absolute URL pointing to the inteiro teor. STJ returns a PDF directly (`/SCON/GetInteiroTeorDoAcordao?...`); STF returns a details page that hosts the PDF; TST returns the closest matching link found within each result block. |
+| `relator_original` | `str \| None` | TJES | Original rapporteur's name when the decision was rendered by a winning dissent — situation in which the TJES API indexes the case by the redator (winning vote) instead of the original relator. |
+| `divergencia_vencedora` | `bool` | TJES | `True` when the decision was rendered by a winning dissent. Defaults to `False`. |
+
+All four fields default to `None`/`False` when the court doesn't expose the data, so the change is
+fully backwards compatible — existing consumers that don't read them keep working.
 
 ### Search Operators
 
 Each court supports specific search operators for more precise queries. See the tool descriptions
 for detailed syntax (e.g., `e`, `ou`, `não`, `adj`, `prox`, `$`, `?` for STJ; `E`, `OU`, `NÃO`,
-`"..."`, `"..."~N`, `$`, `?` for STF).
+`"..."`, `"..."~N`, `$`, `?` for STF). For TJES, terms are combined with implicit `AND`.
 
 ## Development
 

@@ -2,11 +2,11 @@ import asyncio
 
 import pytest
 
-from brlaw_mcp_server.domain.base import BaseLegalPrecedent
-from brlaw_mcp_server.domain.stf import StfLegalPrecedent
-from brlaw_mcp_server.domain.stj import StjLegalPrecedent
-from brlaw_mcp_server.domain.tst import TstLegalPrecedent
-from brlaw_mcp_server.utils import browser_factory
+from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.stf import StfLegalPrecedent
+from jurismcp.domain.stj import StjLegalPrecedent
+from jurismcp.domain.tst import TstLegalPrecedent
+from jurismcp.utils import browser_factory
 
 
 @pytest.mark.parametrize(

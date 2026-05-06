@@ -36,7 +36,7 @@ via requisições HTTP diretas com codificação ISO-8859-1 adequada.
 
 1. Clone o repositório:
 ```bash
-git clone https://github.com/pdmtt/brlaw_mcp_server.git
+git clone https://github.com/pdmtt/jurismcp.git
 ```
 
 2. Instale as dependências
@@ -48,11 +48,11 @@ uv run patchright install
 ```json
 {
   "mcpServers": {
-    "brlaw_mcp_server": {
+    "jurismcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "/<caminho>/brlaw_mcp_server",
+        "/<caminho>/jurismcp",
         "run",
         "serve"
       ]

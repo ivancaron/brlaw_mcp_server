@@ -3,13 +3,13 @@
 import pytest
 from pydantic import ValidationError
 
-from brlaw_mcp_server.presentation.mcp import StjLegalPrecedentsRequest
+from jurismcp.presentation.mcp import StjLegalPrecedentsRequest
 
 
 @pytest.mark.asyncio
 async def test_listed_tools() -> None:
     """Test all listed tools."""
-    from brlaw_mcp_server.presentation.mcp import call_tool, list_tools
+    from jurismcp.presentation.mcp import call_tool, list_tools
 
     tools = await list_tools()
     assert len(tools) > 0

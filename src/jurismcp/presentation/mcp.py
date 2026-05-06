@@ -8,11 +8,12 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
-from brlaw_mcp_server.domain.base import BaseLegalPrecedent
-from brlaw_mcp_server.domain.stf import StfLegalPrecedent
-from brlaw_mcp_server.domain.stj import StjLegalPrecedent
-from brlaw_mcp_server.domain.tst import TstLegalPrecedent
-from brlaw_mcp_server.utils import browser_factory
+from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.stf import StfLegalPrecedent
+from jurismcp.domain.stj import StjLegalPrecedent
+from jurismcp.domain.tjes import TjesLegalPrecedent
+from jurismcp.domain.tst import TstLegalPrecedent
+from jurismcp.utils import browser_factory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -338,6 +339,47 @@ class StfLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisicao dos precedentes judiciais do Tribunal de Justica do Espirito Santo (TJES) que satisfacam os criterios passados.
+
+    O TJES e o orgao de cupula do Poder Judiciario do Estado do Espirito Santo. Julga recursos
+    contra decisoes de primeira instancia, incluindo apelacoes civeis e criminais, agravos de
+    instrumento, habeas corpus, mandados de seguranca e demais acoes de competencia originaria
+    do segundo grau.
+
+    As decisoes do TJES sao particularmente relevantes para a atuacao da Defensoria Publica do
+    Estado do Espirito Santo, pois refletem o entendimento local sobre temas como direito penal,
+    familia, consumidor, moradia e direitos fundamentais.
+
+    Esta ferramenta pesquisa acordaos colegiados do 2o grau do PJe-TJES."""
+
+    summary: str = Field(
+        title="Ementa",
+        description=textwrap.dedent("""
+        Criterios que serao buscados nas decisoes do TJES.
+
+        A busca e feita por texto livre no banco de dados de acordaos colegiados do 2o grau.
+        Os termos sao combinados automaticamente (operador AND implicito).
+
+        EXEMPLOS:
+        - "dano moral consumidor banco" - busca acordaos sobre dano moral em relacoes bancarias
+        - "habeas corpus prisao preventiva" - busca HC sobre prisao preventiva
+        - "alimentos provisorios" - busca decisoes sobre alimentos
+        - "usucapiao extraordinaria" - busca sobre usucapiao
+
+        DICA: use termos tecnicos do direito brasileiro para resultados mais precisos.
+        Evite termos muito genericos que retornam milhares de resultados."""),
+        min_length=1,
+        examples=[
+            "dano moral consumidor",
+            "habeas corpus prisao preventiva fundamentacao",
+            "alimentos provisorios revisional",
+            "usucapiao extraordinaria posse mansa",
+            "execucao penal progressao regime",
+        ],
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -345,7 +387,8 @@ _TOOLS_AND_MODELS: Final[
             type[BaseLegalPrecedent],
             type[StjLegalPrecedentsRequest]
             | type[TstLegalPrecedentsRequest]
-            | type[StfLegalPrecedentsRequest],
+            | type[StfLegalPrecedentsRequest]
+            | type[TjesLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -362,6 +405,7 @@ _TOOLS_AND_MODELS: Final[
         (StjLegalPrecedentsRequest, StjLegalPrecedent),
         (TstLegalPrecedentsRequest, TstLegalPrecedent),
         (StfLegalPrecedentsRequest, StfLegalPrecedent),
+        (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
     ]
 ]
 
@@ -389,10 +433,11 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
-    # STJ uses direct HTTP (no browser needed); other courts use browser
+    # STJ and TJES use direct HTTP (no browser needed); other courts use browser
     try:
-        if domain_model is StjLegalPrecedent:
+        if domain_model is StjLegalPrecedent or domain_model is TjesLegalPrecedent:
             # STJ bypasses Cloudflare via processo.stj.jus.br HTTP POST
+            # TJES uses REST API at sistemas.tjes.jus.br HTTP GET
             precedents = await method(
                 None,  # pyright: ignore[reportArgumentType] — browser not used
                 summary_search_prompt=request.summary,
@@ -429,7 +474,7 @@ async def call_tool(
 
 
 async def _serve() -> None:
-    server = Server("brlaw_mcp_server")
+    server = Server("jurismcp")
 
     server.list_tools()(list_tools)
     server.call_tool()(call_tool)
