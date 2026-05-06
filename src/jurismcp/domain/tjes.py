@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Self, override
 
 import httpx
 
-from brlaw_mcp_server.domain.base import BaseLegalPrecedent
+from jurismcp.domain.base import BaseLegalPrecedent
 
 if TYPE_CHECKING:
     from patchright.async_api import Page

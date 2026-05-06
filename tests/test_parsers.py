@@ -1,4 +1,4 @@
-"""Unit tests for the parsing logic of the V3 brlaw upgrade.
+"""Unit tests for the parsing logic of the V3 jurismcp upgrade.
 
 These tests do NOT require network access — they exercise pure parsers and
 helpers added to support the `full_text`, `full_text_url`, `relator_original`
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 import textwrap
 
-from brlaw_mcp_server.domain.stj import _STJ_BASE, StjLegalPrecedent
-from brlaw_mcp_server.domain.tjes import (
+from jurismcp.domain.stj import _STJ_BASE, StjLegalPrecedent
+from jurismcp.domain.tjes import (
     TjesLegalPrecedent,
     _detect_winning_dissent,
 )

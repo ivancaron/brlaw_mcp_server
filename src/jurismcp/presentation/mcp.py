@@ -8,12 +8,12 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
-from brlaw_mcp_server.domain.base import BaseLegalPrecedent
-from brlaw_mcp_server.domain.stf import StfLegalPrecedent
-from brlaw_mcp_server.domain.stj import StjLegalPrecedent
-from brlaw_mcp_server.domain.tjes import TjesLegalPrecedent
-from brlaw_mcp_server.domain.tst import TstLegalPrecedent
-from brlaw_mcp_server.utils import browser_factory
+from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.stf import StfLegalPrecedent
+from jurismcp.domain.stj import StjLegalPrecedent
+from jurismcp.domain.tjes import TjesLegalPrecedent
+from jurismcp.domain.tst import TstLegalPrecedent
+from jurismcp.utils import browser_factory
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -474,7 +474,7 @@ async def call_tool(
 
 
 async def _serve() -> None:
-    server = Server("brlaw_mcp_server")
+    server = Server("jurismcp")
 
     server.list_tools()(list_tools)
     server.call_tool()(call_tool)

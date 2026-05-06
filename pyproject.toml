@@ -1,5 +1,5 @@
 [project]
-name = "brlaw_mcp_server"
+name = "jurismcp"
 description = "A MCP server for agent-based research on Brazilian law"
 authors = [{ name = "Pedro Roque de Mattia", email = "pedromattia@gmail.com" }]
 readme = "README.md"
@@ -14,7 +14,7 @@ dependencies = [
 ]
 
 [project.scripts]
-serve = "brlaw_mcp_server.presentation.mcp:serve"
+serve = "jurismcp.presentation.mcp:serve"
 
 [dependency-groups]
 dev = [

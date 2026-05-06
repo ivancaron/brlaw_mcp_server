@@ -1,12 +1,12 @@
-# Brazilian Law Research MCP Server
+# Jurismcp — Brazilian Law Research MCP Server
 
 [🇧🇷 Leia em português](README.br.md)
 
 A MCP (Model Context Protocol) server for agent-driven research on Brazilian law using official 
 sources.
 
-<a href="https://glama.ai/mcp/servers/@pdmtt/brlaw_mcp_server">
-  <img width="380" height="200" src="https://glama.ai/mcp/servers/@pdmtt/brlaw_mcp_server/badge" alt="Brazilian Law Research Server MCP server" />
+<a href="https://glama.ai/mcp/servers/@pdmtt/jurismcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@pdmtt/jurismcp/badge" alt="Brazilian Law Research Server MCP server" />
 </a>
 
 ## Foreword
@@ -45,7 +45,7 @@ need for an extra request to obtain the inteiro teor.
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/pdmtt/brlaw_mcp_server.git
+git clone https://github.com/pdmtt/jurismcp.git
 ```
 
 2. Install the dependencies
@@ -57,11 +57,11 @@ uv run patchright install
 ```json
 {
   "mcpServers": {
-    "brlaw_mcp_server": {
+    "jurismcp": {
       "command": "uv",
       "args": [
         "--directory",
-        "/<path>/brlaw_mcp_server",
+        "/<path>/jurismcp",
         "run",
         "serve"
       ]

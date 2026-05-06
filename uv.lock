@@ -38,43 +38,6 @@ wheels = [
 ]
 
 [[package]]
-name = "brlaw-mcp-server"
-version = "0.4.2"
-source = { editable = "." }
-dependencies = [
-    { name = "click" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "patchright" },
-    { name = "pydantic" },
-    { name = "python-json-logger" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "basedpyright" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "click", specifier = ">=8.1.8" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
-    { name = "patchright", specifier = ">=1.52.4" },
-    { name = "pydantic", specifier = ">=2.11.3" },
-    { name = "python-json-logger", specifier = ">=3.3.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "basedpyright", specifier = ">=1.28.5" },
-    { name = "pytest", specifier = ">=8.3.4" },
-    { name = "pytest-asyncio", specifier = ">=0.25.3" },
-    { name = "ruff", specifier = ">=0.9.10" },
-]
-
-[[package]]
 name = "certifi"
 version = "2025.4.26"
 source = { registry = "https://pypi.org/simple" }
@@ -200,6 +163,43 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f2/97/ebf4da567aa6827c909642694d71c9fcf53e5b504f2d96afea02718862f3/iniconfig-2.1.0.tar.gz", hash = "sha256:3abbd2e30b36733fee78f9c7f7308f2d0050e88f0087fd25c2645f63c773e1c7", size = 4793, upload-time = "2025-03-19T20:09:59.721Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2c/e1/e6716421ea10d38022b952c159d5161ca1193197fb744506875fbb87ea7b/iniconfig-2.1.0-py3-none-any.whl", hash = "sha256:9deba5723312380e77435581c6bf4935c94cbfab9b1ed33ef8d238ea168eb760", size = 6050, upload-time = "2025-03-19T20:10:01.071Z" },
+]
+
+[[package]]
+name = "jurismcp"
+version = "0.4.2"
+source = { editable = "." }
+dependencies = [
+    { name = "click" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "patchright" },
+    { name = "pydantic" },
+    { name = "python-json-logger" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "basedpyright" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.1.8" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.6.0" },
+    { name = "patchright", specifier = ">=1.52.4" },
+    { name = "pydantic", specifier = ">=2.11.3" },
+    { name = "python-json-logger", specifier = ">=3.3.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "basedpyright", specifier = ">=1.28.5" },
+    { name = "pytest", specifier = ">=8.3.4" },
+    { name = "pytest-asyncio", specifier = ">=0.25.3" },
+    { name = "ruff", specifier = ">=0.9.10" },
 ]
 
 [[package]]

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Self, override
 from patchright.async_api import TimeoutError
 from pydantic import field_validator
 
-from brlaw_mcp_server.domain.base import BaseLegalPrecedent
+from jurismcp.domain.base import BaseLegalPrecedent
 
 if TYPE_CHECKING:
     from patchright.async_api import Page
