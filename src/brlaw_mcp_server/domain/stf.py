@@ -89,9 +89,26 @@ class StfLegalPrecedent(BaseLegalPrecedent):
             )
             summary = cast("str", await handle.json_value())
 
+            # Extract the URL pointing to the decision details page. The first
+            # <a> within the result block carries `href="/pages/search/<id>/false"`
+            # — that page contains the PDF / decision text. We resolve to an
+            # absolute URL so the consumer can fetch it directly.
+            full_text_url: str | None = None
+            try:
+                first_link = result_locator.locator("a").first
+                href = await first_link.get_attribute("href")
+                if href and href.startswith("/"):
+                    full_text_url = f"https://jurisprudencia.stf.jus.br{href}"
+                elif href and href.startswith("http"):
+                    full_text_url = href
+            except Exception:
+                # Best-effort extraction; URL is optional.
+                _LOGGER.debug("Could not extract STF inteiro teor URL", exc_info=True)
+
             return_value.append(
                 cls(
                     summary=summary,
+                    full_text_url=full_text_url,
                 )
             )
 

@@ -61,15 +61,55 @@ class TstLegalPrecedent(BaseLegalPrecedent):
 
         await browser.locator("circle").wait_for(state="hidden", timeout=1000 * 30)
 
-        precedents = [
-            cls(summary=text)
-            for locator in await browser.locator("div[id^=celulaLeiaMaisAcordao]").all()
-            if (text := await locator.text_content()) is not None
-        ]
+        # Each result block is a `div[id^=celulaLeiaMaisAcordao]` and may contain
+        # one or more `<a>` linking to the inteiro teor (PDF or HTML). We try to
+        # extract such a link by looking for anchors carrying suggestive text
+        # ("Inteiro Teor", "Acórdão") or hrefs ending in `.pdf` / containing
+        # `icAcessoOriginal`. Falls back to None when the link cannot be found.
+        result_locators = await browser.locator("div[id^=celulaLeiaMaisAcordao]").all()
+
+        precedents: list[Self] = []
+        for locator in result_locators:
+            text = await locator.text_content()
+            if text is None:
+                continue
+
+            full_text_url: str | None = None
+            try:
+                anchors = await locator.locator("a").all()
+                for anchor in anchors:
+                    href = await anchor.get_attribute("href")
+                    label = (await anchor.text_content() or "").strip().lower()
+                    if not href:
+                        continue
+                    is_inteiro_teor = (
+                        "inteiro" in label
+                        or "acórdão" in label
+                        or "acordao" in label
+                        or href.lower().endswith(".pdf")
+                        or "icacessooriginal" in href.lower()
+                        or "consultadocumento" in href.lower()
+                    )
+                    if is_inteiro_teor:
+                        # Resolve to absolute URL when href is relative
+                        if href.startswith("/"):
+                            full_text_url = f"https://jurisprudencia.tst.jus.br{href}"
+                        elif href.startswith("http"):
+                            full_text_url = href
+                        else:
+                            full_text_url = f"https://jurisprudencia.tst.jus.br/{href}"
+                        break
+            except Exception:
+                # Best-effort extraction; URL is optional and the test layout
+                # of the TST jurisprudence page may change.
+                _LOGGER.debug("Could not extract TST inteiro teor URL", exc_info=True)
+
+            precedents.append(cls(summary=text, full_text_url=full_text_url))
 
         _LOGGER.info(
-            "Found %d legal precedents",
+            "Found %d legal precedents (%d with inteiro teor URL)",
             len(precedents),
+            sum(1 for p in precedents if p.full_text_url),
         )
 
         return precedents

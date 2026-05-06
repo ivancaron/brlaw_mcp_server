@@ -43,12 +43,54 @@ _HEADERS = {
 _HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
 _WHITESPACE_PATTERN = re.compile(r"\s+")
 
+# Pattern to detect winning dissent (voto vencedor por divergência) and extract the
+# original rapporteur's name from the acórdão text. The TJES API indexes such
+# decisions by the winner (redator), not the original relator, so we parse the
+# composition line to recover the actual rapporteur.
+_VOTO_VENCEDOR_PATTERN = re.compile(r"VOTO\s+VENCEDOR", re.IGNORECASE)
+_RELATOR_ORIGINAL_PATTERN = re.compile(
+    # Captures the name after "Relator:" in the composition line, ignoring
+    # case and whitespace variations. Stops at common delimiters.
+    r"Relator\s*:\s*Desembargador(?:\(a\))?\s+([A-ZÁÉÍÓÚÂÊÔÃÕÇ][^\n/]+?)(?:\s{2,}|\s*/|\s*\n|\s*Sess[ãa]o)",
+    re.IGNORECASE,
+)
+
 
 def _clean_text(text: str) -> str:
     """Remove HTML tags and normalize whitespace from text."""
     text = _HTML_TAG_PATTERN.sub(" ", text)
     text = _WHITESPACE_PATTERN.sub(" ", text)
     return text.strip()
+
+
+def _detect_winning_dissent(
+    acordao_text: str, magistrado_api: str
+) -> tuple[str | None, bool]:
+    """Detect if the decision was rendered by a winning dissent.
+
+    The TJES API returns the redator (winning rapporteur) in the `magistrado`
+    field, regardless of whether the case was originally assigned to a different
+    relator who lost the vote. We inspect the acórdão text to detect this and
+    recover the original rapporteur's name.
+
+    Returns:
+        (relator_original_name, divergencia_vencedora_flag)
+        - relator_original_name: name when different from magistrado_api, else None
+        - divergencia_vencedora_flag: True when the decision is a winning dissent
+    """
+    if not acordao_text or "VOTO VENCEDOR" not in acordao_text.upper():
+        return None, False
+
+    match = _RELATOR_ORIGINAL_PATTERN.search(acordao_text)
+    if not match:
+        return None, False
+
+    relator_orig = re.sub(r"\s+", " ", match.group(1)).strip().rstrip(",.")
+    # Compare uppercased and stripped to detect divergence
+    if relator_orig.upper() != magistrado_api.strip().upper():
+        return relator_orig, True
+
+    return None, False
 
 
 class TjesLegalPrecedent(BaseLegalPrecedent):
@@ -66,7 +108,7 @@ class TjesLegalPrecedent(BaseLegalPrecedent):
         - orgao_julgador: judging body (chamber/section)
         - dt_juntada: date of the decision
         - assunto_principal: main subject
-        - acordao: full text of the decision (not used here)
+        - acordao: full text of the decision (used to populate full_text field)
         """
         docs = data.get("docs", [])
         total = data.get("total", 0)
@@ -78,13 +120,19 @@ class TjesLegalPrecedent(BaseLegalPrecedent):
 
         results: list[Self] = []
         for doc in docs:
+            # Capture the full text of the decision (may be tens of thousands of chars).
+            # The TJES REST API returns the complete acórdão in this field on the same
+            # response as the summary, so we populate full_text without an extra request.
+            acordao_raw = doc.get("acordao", "") or ""
+            acordao_full = _clean_text(acordao_raw) if acordao_raw else ""
+
             ementa = doc.get("ementa", "")
             if not ementa or not ementa.strip():
                 # Some decisions have "Voto servindo como ementa" or empty ementa.
-                # Try to build a minimal summary from the acordao text.
-                acordao = doc.get("acordao", "")
-                if acordao:
-                    ementa = _clean_text(acordao)[:2000]
+                # Build a minimal summary from the acordao text (kept truncated for
+                # the summary field, which is meant to be a short ementa).
+                if acordao_full:
+                    ementa = acordao_full[:2000]
                 else:
                     continue
 
@@ -124,7 +172,21 @@ class TjesLegalPrecedent(BaseLegalPrecedent):
             else:
                 summary = ementa
 
-            results.append(cls(summary=summary))
+            # Detect winning dissent: API returns the redator (winner) as
+            # `magistrado`, but the original relator may differ. We parse the
+            # acórdão text to recover this when it occurs.
+            relator_original, divergencia_vencedora = _detect_winning_dissent(
+                acordao_full, magistrado
+            )
+
+            results.append(
+                cls(
+                    summary=summary,
+                    full_text=acordao_full or None,
+                    relator_original=relator_original,
+                    divergencia_vencedora=divergencia_vencedora,
+                )
+            )
 
         _LOGGER.info("Parsed %d legal precedent(s) from TJES", len(results))
         return results

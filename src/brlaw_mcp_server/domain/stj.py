@@ -46,6 +46,17 @@ _EMENTA_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Each result block on the SCON HTML is wrapped by `<a name="DOCN"></a>` followed
+# by `<div class="documento">`. Inside each block there is exactly one
+# `inteiro_teor('/SCON/GetInteiroTeorDoAcordao?num_registro=...&dt_publicacao=...')`
+# call. We use `_DOC_BLOCK_PATTERN` to split the HTML into individual result
+# blocks, then `_INTEIRO_TEOR_PATTERN` extracts the URL parameters from each.
+_DOC_BLOCK_SPLIT = re.compile(r'<a name="DOC\d+"></a>', re.DOTALL)
+_INTEIRO_TEOR_PATTERN = re.compile(
+    r"GetInteiroTeorDoAcordao\?num_registro=(\d+)&(?:amp;)?dt_publicacao=([\d/]+)"
+)
+_STJ_BASE = "https://processo.stj.jus.br"
+
 
 class StjLegalPrecedent(BaseLegalPrecedent):
     """Model for a legal precedent from the Superior Tribunal de Justica (STJ)."""
@@ -116,11 +127,16 @@ class StjLegalPrecedent(BaseLegalPrecedent):
 
     @classmethod
     def _parse_ementas(cls, html: str) -> list[Self]:
-        """Extract ementa texts from the HTML response."""
-        matches = _EMENTA_PATTERN.findall(html)
-        _LOGGER.debug("Found %d ementa(s) in response", len(matches))
+        """Extract ementa texts and inteiro-teor URLs from the HTML response.
 
-        if not matches:
+        Each `<div class="documento">` block contains both the ementa and a
+        link to the inteiro teor in the form `GetInteiroTeorDoAcordao?...`.
+        We split the HTML by `<a name="DOCN"></a>` markers and pair them up.
+        """
+        # Split by document markers — first chunk is the page header (no result)
+        chunks = _DOC_BLOCK_SPLIT.split(html)[1:]
+
+        if not chunks:
             if "Nenhum documento encontrado" in html:
                 _LOGGER.info("No legal precedents found for the given search")
                 return []
@@ -133,11 +149,37 @@ class StjLegalPrecedent(BaseLegalPrecedent):
                 _LOGGER.warning("SCON returned an error: %s", error_text)
                 return []
 
-        return [
-            cls(summary=text.strip())
-            for text in matches
-            if text.strip()
-        ]
+            # Fallback: no document blocks but no clear error — try plain ementa extraction
+            matches = _EMENTA_PATTERN.findall(html)
+            return [cls(summary=text.strip()) for text in matches if text.strip()]
+
+        results: list[Self] = []
+        for chunk in chunks:
+            ementa_match = _EMENTA_PATTERN.search(chunk)
+            if not ementa_match:
+                continue
+            ementa = ementa_match.group(1).strip()
+            if not ementa:
+                continue
+
+            # Each chunk should have exactly one inteiro teor URL
+            url_match = _INTEIRO_TEOR_PATTERN.search(chunk)
+            full_text_url: str | None = None
+            if url_match:
+                num_registro, dt_publicacao = url_match.group(1), url_match.group(2)
+                full_text_url = (
+                    f"{_STJ_BASE}/SCON/GetInteiroTeorDoAcordao"
+                    f"?num_registro={num_registro}&dt_publicacao={dt_publicacao}"
+                )
+
+            results.append(cls(summary=ementa, full_text_url=full_text_url))
+
+        _LOGGER.debug(
+            "Parsed %d result block(s); %d with inteiro-teor URL",
+            len(results),
+            sum(1 for r in results if r.full_text_url),
+        )
+        return results
 
     @override
     @classmethod

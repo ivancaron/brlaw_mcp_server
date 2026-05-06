@@ -50,6 +50,58 @@ class BaseLegalPrecedent(BaseModel):
     )
     """The summary of the legal precedent."""
 
+    full_text: str | None = Field(
+        default=None,
+        title="Inteiro teor",
+        description=(
+            "Texto integral do acórdão (ementa + relatório + voto + dispositivo), quando "
+            "disponibilizado pelo portal do tribunal na mesma resposta da pesquisa. None "
+            "quando o tribunal não expõe esse conteúdo na busca, exigindo requisição "
+            "adicional ou consulta processual com credencial."
+        ),
+    )
+    """The full text of the decision when available from the court's search response."""
+
+    full_text_url: str | None = Field(
+        default=None,
+        title="URL do inteiro teor",
+        description=(
+            "URL absoluta do inteiro teor do acórdão (PDF, HTML ou página de "
+            "detalhes da decisão). Útil quando o tribunal expõe o link para "
+            "download/visualização mas não devolve o texto direto na resposta "
+            "da pesquisa. Ex.: STJ retorna PDF em "
+            "https://processo.stj.jus.br/SCON/GetInteiroTeorDoAcordao?... ; STF "
+            "retorna a página de detalhamento em "
+            "https://jurisprudencia.stf.jus.br/pages/search/.../false. None "
+            "quando o tribunal não expõe esse link no resultado da busca."
+        ),
+    )
+    """The URL pointing to the full text of the decision (PDF or HTML), when exposed by the court."""
+
+    relator_original: str | None = Field(
+        default=None,
+        title="Relator original",
+        description=(
+            "Nome do relator original do recurso, quando diferente do redator do "
+            "acórdão. Útil em casos de divergência vencedora, onde o portal do "
+            "tribunal indexa o acórdão pelo redator (voto vencedor) e não pelo "
+            "relator originário. None quando o relator é o próprio redator do "
+            "acórdão (caso comum, sem divergência)."
+        ),
+    )
+    """The original rapporteur's name when the decision was decided by a winning dissent."""
+
+    divergencia_vencedora: bool = Field(
+        default=False,
+        title="Divergência vencedora",
+        description=(
+            "True quando o acórdão foi decidido por voto vencedor inaugurado por "
+            "divergência (o redator do acórdão venceu o relator original). False "
+            "no caso comum em que o relator e o redator são a mesma pessoa."
+        ),
+    )
+    """True when the decision was rendered by a winning dissent."""
+
     @field_validator("summary")
     @classmethod
     def _validate_summary(cls, v: str) -> str:
