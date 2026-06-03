@@ -9,6 +9,7 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
 from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stf import StfLegalPrecedent
 from jurismcp.domain.stj import StjLegalPrecedent
 from jurismcp.domain.tjes import TjesLegalPrecedent
@@ -380,6 +381,47 @@ class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class LexmlLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes judiciais agregados pelo portal LexML (multi-tribunal).
+
+    O LexML (https://www.lexml.gov.br) é a Rede de Informação Legislativa e Jurídica do
+    governo brasileiro. Sua busca de jurisprudência é FEDERADA: agrega acórdãos, súmulas e
+    orientações jurisprudenciais de muitos tribunais (STF, STJ, TST, TSE, STM, TRFs e
+    Tribunais de Justiça estaduais) num único índice.
+
+    Use esta ferramenta quando quiser AMPLITUDE — descobrir precedentes de tribunais que as
+    ferramentas dedicadas (STF, STJ, TST, TJES) não cobrem, ou ter uma visão panorâmica de um
+    tema em várias cortes de uma só vez. Para profundidade num tribunal específico, prefira a
+    ferramenta dedicada daquele tribunal.
+
+    Cada resultado traz metadados (tribunal/órgão de origem, localidade, data), a ementa
+    quando o portal a indexa, e o link resolvedor da URN (urn:lex:br:...) que aponta para o
+    inteiro teor na fonte oficial."""
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+        Termos a serem buscados na jurisprudência federada do LexML.
+
+        A busca é por palavras-chave (texto livre) sobre ementa e metadados, combinadas com
+        operador E implícito. Use termos técnicos do direito brasileiro para resultados mais
+        precisos e evite termos genéricos demais.
+
+        EXEMPLOS:
+        - "alimentos provisórios execução"
+        - "prisão preventiva tráfico fundamentação"
+        - "usucapião extraordinária posse"
+        - "improbidade administrativa dano ao erário" """),
+        min_length=1,
+        examples=[
+            "alimentos provisórios execução",
+            "prisão preventiva tráfico fundamentação",
+            "usucapião extraordinária posse",
+            "improbidade administrativa dano ao erário",
+        ],
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -388,7 +430,8 @@ _TOOLS_AND_MODELS: Final[
             type[StjLegalPrecedentsRequest]
             | type[TstLegalPrecedentsRequest]
             | type[StfLegalPrecedentsRequest]
-            | type[TjesLegalPrecedentsRequest],
+            | type[TjesLegalPrecedentsRequest]
+            | type[LexmlLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -406,6 +449,7 @@ _TOOLS_AND_MODELS: Final[
         (TstLegalPrecedentsRequest, TstLegalPrecedent),
         (StfLegalPrecedentsRequest, StfLegalPrecedent),
         (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
+        (LexmlLegalPrecedentsRequest, LexmlLegalPrecedent),
     ]
 ]
 
@@ -433,11 +477,11 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
-    # STJ and TJES use direct HTTP (no browser needed); other courts use browser
+    # HTTP-based courts (STJ, TJES, LexML, SAJ, TJRS, ...) set
+    # requires_browser=False and are called with browser=None; browser-driven
+    # courts (STF, TST) launch Chromium. New HTTP courts need no change here.
     try:
-        if domain_model is StjLegalPrecedent or domain_model is TjesLegalPrecedent:
-            # STJ bypasses Cloudflare via processo.stj.jus.br HTTP POST
-            # TJES uses REST API at sistemas.tjes.jus.br HTTP GET
+        if not domain_model.requires_browser:
             precedents = await method(
                 None,  # pyright: ignore[reportArgumentType] — browser not used
                 summary_search_prompt=request.summary,

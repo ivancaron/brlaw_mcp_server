@@ -12,7 +12,7 @@ most relevant for jurisprudence research.
 
 import logging
 import re
-from typing import TYPE_CHECKING, Self, override
+from typing import TYPE_CHECKING, ClassVar, Self, override
 
 import httpx
 
@@ -95,6 +95,8 @@ def _detect_winning_dissent(
 
 class TjesLegalPrecedent(BaseLegalPrecedent):
     """Model for a legal precedent from the Tribunal de Justica do Espirito Santo (TJES)."""
+
+    requires_browser: ClassVar[bool] = False  # direct HTTP GET to TJES REST API
 
     @classmethod
     def _parse_results(cls, data: dict) -> list[Self]:

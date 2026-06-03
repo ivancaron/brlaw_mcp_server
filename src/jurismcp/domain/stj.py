@@ -9,7 +9,7 @@ the ementa text.
 import logging
 import re
 import unicodedata
-from typing import TYPE_CHECKING, Self, override
+from typing import TYPE_CHECKING, ClassVar, Self, override
 from urllib.parse import quote
 
 import httpx
@@ -137,6 +137,8 @@ def _clean_html_inline(fragment: str) -> str:
 
 class StjLegalPrecedent(BaseLegalPrecedent):
     """Model for a legal precedent from the Superior Tribunal de Justica (STJ)."""
+
+    requires_browser: ClassVar[bool] = False  # direct HTTP POST to SCON
 
     @staticmethod
     def _build_form_body(

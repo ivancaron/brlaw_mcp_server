@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import textwrap
 
+from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stj import _STJ_BASE, StjLegalPrecedent
 from jurismcp.domain.tjes import (
     TjesLegalPrecedent,
@@ -306,6 +307,87 @@ class TestStjModernTemplateParser:
         assert '"ASPAS"' in results[0].summary
         assert "&amp;" not in results[0].summary
         assert "&nbsp;" not in results[0].summary
+
+
+# ---------------------------------------------------------------------------
+# LexML — `_parse_results` (federated XTF HTML search)
+# ---------------------------------------------------------------------------
+
+
+# Mirrors the live LexML XTF markup: each result is a
+# <div id="main_N" class="docHit"><table> with label/value rows across
+# <td class="col2"><b>LABEL</b></td><td class="col3">VALUE</td> cells.
+# Labels carry trailing non-breaking spaces (&#160;) and the ementa carries
+# <span class="hit"> highlight markup — both must be cleaned away.
+_LEXML_FIXTURE = textwrap.dedent(
+    """\
+    <html><body>
+    <td class="docHit"><div id="main_1" class="docHit"><table>
+      <tr><td class="col1"><b>1</b></td><td class="col2"><b>Localidade&#160;&#160;</b></td><td class="col3">Distrito Federal</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Autoridade&#160;&#160;</b></td><td class="col3">Tribunal de Justiça do Distrito Federal e dos Territórios. 5ª Turma Cível</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Título&#160;&#160;</b></td><td class="col3"><a href="/urn/urn:lex:br;distrito.federal:tribunal.justica.distrito.federal.territorios;turma.civel.5:acordao:2009-11-04;394803">Acórdão nº 394803 do Processo nº20060110390196apc</a>&#160;</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Data&#160;&#160;</b></td><td class="col3">04/11/2009</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Ementa&#160;&#160;</b></td><td class="col3">CIVIL. EXECUÇÃO DE <span class="hit">ALIMENTOS</span> PROVISÓRIOS. POSSIBILIDADE.</td><td class="col4"> </td></tr>
+    </table></div></td>
+    <td class="docHit"><div id="main_2" class="docHit"><table>
+      <tr><td class="col1"><b>2</b></td><td class="col2"><b>Localidade&#160;&#160;</b></td><td class="col3">Federal</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Autoridade&#160;&#160;</b></td><td class="col3">Superior Tribunal de Justiça</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Título&#160;&#160;</b></td><td class="col3"><a href="/urn/urn:lex:br:superior.tribunal.justica:acordao:2020-05-12;1896526">REsp 1896526</a></td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Data&#160;&#160;</b></td><td class="col3">12/05/2020</td><td class="col4"> </td></tr>
+    </table></div></td>
+    </body></html>
+    """
+)
+
+
+class TestLexmlParseResults:
+    """LexML federates jurisprudence from many courts. Records expose
+    metadata (localidade, autoridade, título, data) plus an ementa when
+    indexed, and a URN link to the source. The parser builds a metadata
+    header + body summary, and fills ``court``/``urn``/``full_text_url``."""
+
+    def test_parses_two_federated_results(self) -> None:
+        results = LexmlLegalPrecedent._parse_results(_LEXML_FIXTURE)
+        assert len(results) == 2
+
+        first, second = results
+
+        # First: TJDFT, with ementa
+        assert first.court == (
+            "Tribunal de Justiça do Distrito Federal e dos Territórios. "
+            "5ª Turma Cível"
+        )
+        assert "Tribunal/Órgão:" in first.summary
+        assert "Data: 04/11/2009" in first.summary
+        assert "Acórdão nº 394803" in first.summary
+        # ementa cleaned: highlight span unwrapped, kept text
+        assert "EXECUÇÃO DE ALIMENTOS PROVISÓRIOS" in first.summary
+        assert "<span" not in first.summary
+        # urn + resolver link
+        assert first.urn == (
+            "urn:lex:br;distrito.federal:tribunal.justica.distrito.federal."
+            "territorios;turma.civel.5:acordao:2009-11-04;394803"
+        )
+        assert first.full_text_url == f"https://www.lexml.gov.br/urn/{first.urn}"
+
+        # Second: STJ, no ementa row — summary still built from título + meta
+        assert second.court == "Superior Tribunal de Justiça"
+        assert "REsp 1896526" in second.summary
+        assert second.urn is not None
+        assert second.urn.startswith("urn:lex:br:superior.tribunal.justica")
+
+    def test_label_nbsp_is_normalized(self) -> None:
+        """Trailing &#160; on labels must not break field-key matching."""
+        results = LexmlLegalPrecedent._parse_results(_LEXML_FIXTURE)
+        # If labels weren't normalized, court/data would be missing.
+        assert all(r.court for r in results)
+
+    def test_returns_empty_when_no_dochit_blocks(self) -> None:
+        html = (
+            "<html><body><div class='results'>"
+            "Nenhum documento encontrado</div></body></html>"
+        )
+        assert LexmlLegalPrecedent._parse_results(html) == []
 
 
 # ---------------------------------------------------------------------------

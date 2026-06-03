@@ -26,6 +26,7 @@ Each court uses the most reliable access method available:
 | **STF** | Headless browser (Chromium) | `jurisprudencia.stf.jus.br` |
 | **TST** | Headless browser (Chromium) | `jurisprudencia.tst.jus.br` |
 | **TJES** | Direct HTTP GET (REST API) | `sistemas.tjes.jus.br/consulta-jurisprudencia/api/search` |
+| **LexML** (federated) | Direct HTTP GET (HTML scrape) | `lexml.gov.br/busca/search` |
 
 The STJ endpoint (`processo.stj.jus.br`) serves the same SCON search results as
 `scon.stj.jus.br` but without Cloudflare Turnstile protection, enabling fast and
@@ -34,6 +35,19 @@ reliable access via direct HTTP requests with proper ISO-8859-1 form encoding.
 The TJES endpoint exposes a public JSON API that returns each ruling's full
 text (`acordao` field) on the same response as the summary, eliminating the
 need for an extra request to obtain the inteiro teor.
+
+**LexML** is the Brazilian government's federated legal-information portal: a
+single query surfaces jurisprudence aggregated from many courts (STF, STJ, TST,
+TSE, STM, the regional federal courts and the state courts of justice). It is the
+breadth source — use it to discover precedents from courts without a dedicated
+tool, and use the dedicated tools for depth in a specific court. Records carry
+metadata, the ementa when indexed, and a `urn:lex` resolver link to the official
+full text. The legacy SRU/XML endpoint was decommissioned, so results are scraped
+from the server-rendered UTF-8 HTML of the XTF search; no browser is needed.
+
+A new design switch, `BaseLegalPrecedent.requires_browser`, lets the dispatcher
+pick HTTP vs. browser automatically per court, so adding a new HTTP-based court
+needs no change to the dispatch logic.
 
 ## Requirements
 
@@ -80,6 +94,9 @@ uv run patchright install
   the specified criteria.
 - `TjesLegalPrecedentsRequest`: Research legal precedents made by the Court of Justice of the State
   of Espírito Santo (TJES). Uses TJES public REST API.
+- `LexmlLegalPrecedentsRequest`: Research **federated** jurisprudence aggregated by the LexML portal
+  across many Brazilian courts at once. Best for breadth/discovery; returns metadata, the ementa
+  when indexed, and a `urn:lex` link to the source. Uses a direct HTTP GET (no browser).
 
 ### Response Fields
 
@@ -93,9 +110,11 @@ results may also expose the following optional fields when the source court prov
 | `full_text_url` | `str \| None` | STJ, STF, TST | Absolute URL pointing to the inteiro teor. STJ returns a PDF directly (`/SCON/GetInteiroTeorDoAcordao?...`); STF returns a details page that hosts the PDF; TST returns the closest matching link found within each result block. |
 | `relator_original` | `str \| None` | TJES | Original rapporteur's name when the decision was rendered by a winning dissent — situation in which the TJES API indexes the case by the redator (winning vote) instead of the original relator. |
 | `divergencia_vencedora` | `bool` | TJES | `True` when the decision was rendered by a winning dissent. Defaults to `False`. |
+| `court` | `str \| None` | LexML | Originating court/organ of a federated result, since LexML aggregates many courts in one response. |
+| `urn` | `str \| None` | LexML | The `urn:lex:br:...` identifier of the document; pairs with `full_text_url` (the URN resolver link). |
 
-All four fields default to `None`/`False` when the court doesn't expose the data, so the change is
-fully backwards compatible — existing consumers that don't read them keep working.
+All optional fields default to `None`/`False` when the court doesn't expose the data, so the change
+is fully backwards compatible — existing consumers that don't read them keep working.
 
 ### Search Operators
 
