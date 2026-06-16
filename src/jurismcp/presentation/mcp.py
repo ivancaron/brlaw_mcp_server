@@ -360,16 +360,19 @@ class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
         Criterios que serao buscados nas decisoes do TJES.
 
         A busca e feita por texto livre no banco de dados de acordaos colegiados do 2o grau.
-        Os termos sao combinados automaticamente (operador AND implicito).
+        Os termos sao combinados com AND: TODOS os termos significativos precisam
+        aparecer no acordao (conectores como "de"/"do"/"e" sao ignorados). Por isso,
+        quanto MAIS termos, MENOS resultados — se vier vazio, remova termos e amplie.
 
         EXEMPLOS:
-        - "dano moral consumidor banco" - busca acordaos sobre dano moral em relacoes bancarias
-        - "habeas corpus prisao preventiva" - busca HC sobre prisao preventiva
-        - "alimentos provisorios" - busca decisoes sobre alimentos
-        - "usucapiao extraordinaria" - busca sobre usucapiao
+        - "dano moral consumidor banco" - acordaos que contenham dano E moral E consumidor E banco
+        - "habeas corpus prisao preventiva" - HC sobre prisao preventiva
+        - "alimentos provisorios" - decisoes sobre alimentos
+        - "usucapiao extraordinaria" - sobre usucapiao
 
-        DICA: use termos tecnicos do direito brasileiro para resultados mais precisos.
-        Evite termos muito genericos que retornam milhares de resultados."""),
+        DICA: comece com 2-3 termos tecnicos distintivos. Para frase exata ou busca
+        avancada, use aspas/operadores ("expressao exata", +obrigatorio, -excluir, AND/OR/NOT)
+        — nesse caso a query e enviada como voce escreveu, sem reescrita automatica."""),
         min_length=1,
         examples=[
             "dano moral consumidor",

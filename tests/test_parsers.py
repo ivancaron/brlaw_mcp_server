@@ -14,8 +14,52 @@ from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stj import _STJ_BASE, StjLegalPrecedent
 from jurismcp.domain.tjes import (
     TjesLegalPrecedent,
+    _build_and_query,
     _detect_winning_dissent,
 )
+
+
+# ---------------------------------------------------------------------------
+# TJES — `_build_and_query` (AND semantics fix)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAndQuery:
+    """The pje2g core defaults to OR; plain multi-word queries must be
+    rewritten to required-term AND (+term) so they don't flood with documents
+    matching only the common words."""
+
+    def test_plain_multiword_becomes_required_terms(self) -> None:
+        assert (
+            _build_and_query("turismo de aventura responsabilidade")
+            == "+turismo +aventura +responsabilidade"
+        )
+
+    def test_stopwords_and_connectors_are_dropped(self) -> None:
+        # "de" must NOT become "+de" (analyzer drops it -> would zero the search)
+        out = _build_and_query("responsabilidade do estado")
+        assert out == "+responsabilidade +estado"
+        assert "+do" not in out
+
+    def test_single_distinctive_term_left_untouched(self) -> None:
+        # Nothing to AND; single-term OR already ranks correctly.
+        assert _build_and_query("tirolesa") == "tirolesa"
+
+    def test_quoted_phrase_is_advanced_and_untouched(self) -> None:
+        q = '"turismo de aventura"'
+        assert _build_and_query(q) == q
+
+    def test_explicit_operators_left_untouched(self) -> None:
+        assert _build_and_query("dano AND moral") == "dano AND moral"
+        assert _build_and_query("+rafting acidente") == "+rafting acidente"
+        assert _build_and_query("turismo -aventura") == "turismo -aventura"
+
+    def test_hyphenated_word_is_not_mistaken_for_operator(self) -> None:
+        # "boia-cross" must not trip the +/- advanced detector.
+        assert _build_and_query("boia-cross acidente") == "+boia-cross +acidente"
+
+    def test_empty_query_returns_empty(self) -> None:
+        assert _build_and_query("   ") == ""
 
 # ---------------------------------------------------------------------------
 # TJES — `_detect_winning_dissent`
