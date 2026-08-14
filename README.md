@@ -27,6 +27,7 @@ Each court uses the most reliable access method available:
 | **TST** | Headless browser (Chromium) | `jurisprudencia.tst.jus.br` |
 | **TJES** | Direct HTTP GET (REST API) | `sistemas.tjes.jus.br/consulta-jurisprudencia/api/search` |
 | **LexML** (federated) | Direct HTTP GET (HTML scrape) | `lexml.gov.br/busca/search` |
+| **Jurisprudencias.ai** (opt-in, multi-court) | Direct HTTP GET (JSON REST API, token) | `jurisprudencias.ai/api/v1/courts/{court}/decisions` |
 
 The STJ endpoint (`processo.stj.jus.br`) serves the same SCON search results as
 `scon.stj.jus.br` but without Cloudflare Turnstile protection, enabling fast and
@@ -97,6 +98,17 @@ uv run patchright install
 - `LexmlLegalPrecedentsRequest`: Research **federated** jurisprudence aggregated by the LexML portal
   across many Brazilian courts at once. Best for breadth/discovery; returns metadata, the ementa
   when indexed, and a `urn:lex` link to the source. Uses a direct HTTP GET (no browser).
+- `JurisprudenciasAiLegalPrecedentsRequest`: **Optional, opt-in** multi-court source backed by the
+  Jurisprudencias.ai REST API (a third-party aggregator, not an official portal). Requires the
+  `JURISPRUDENCIAS_AI_TOKEN` environment variable (a `jur_...` token from
+  [jurisprudencias.ai/api-tokens](https://jurisprudencias.ai/api-tokens)); without it the tool
+  returns a clear error and the other sources keep working. Takes a required `court` id (e.g.
+  `tjsp`, `tjrs`, `tjmg`, `carf`, `trf4`) plus the search terms, and returns the ementa/excerpt,
+  metadata and the official tribunal deep-link in `full_text_url`. Covers state courts (TJSP, TJRS,
+  TJMG, TJPR, TJSC, TJRJ, TJCE, TJGO, TJMA, TJMT), TRF3/TRF4 and **CARF** — courts the dedicated
+  scrapers don't reach in depth. It does **not** cover the TJES (use `TjesLegalPrecedentsRequest`
+  for the home court). Direct HTTP GET (no browser). The free tier is limited (5 searches/day), so
+  it is meant for on-demand persuasive-precedent lookups, not for high-volume parallel search.
 
 ### Response Fields
 

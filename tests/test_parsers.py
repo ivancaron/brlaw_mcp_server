@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import textwrap
 
+from jurismcp.domain.jurisprudencias_ai import (
+    JurisprudenciasAiLegalPrecedent,
+    _ascii_query,
+    _format_date,
+)
 from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stj import _STJ_BASE, StjLegalPrecedent
 from jurismcp.domain.tjes import (
@@ -17,7 +22,6 @@ from jurismcp.domain.tjes import (
     _build_and_query,
     _detect_winning_dissent,
 )
-
 
 # ---------------------------------------------------------------------------
 # TJES — `_build_and_query` (AND semantics fix)
@@ -432,6 +436,103 @@ class TestLexmlParseResults:
             "Nenhum documento encontrado</div></body></html>"
         )
         assert LexmlLegalPrecedent._parse_results(html) == []
+
+
+# ---------------------------------------------------------------------------
+# Jurisprudencias.ai — helpers + `_parse_results` (token-gated multi-court API)
+# ---------------------------------------------------------------------------
+
+
+class TestJurisprudenciasAiHelpers:
+    """The WAF rejects accented queries (400); we fold to ASCII before sending
+    (the provider's search is accent-insensitive). Dates arrive ISO or BR."""
+
+    def test_ascii_query_strips_accents(self) -> None:
+        assert _ascii_query("tráfico privilegiado") == "trafico privilegiado"
+        assert _ascii_query("usucapião extraordinária") == "usucapiao extraordinaria"
+
+    def test_ascii_query_collapses_whitespace(self) -> None:
+        assert _ascii_query("  dano   moral  ") == "dano moral"
+
+    def test_ascii_query_keeps_plain_ascii(self) -> None:
+        assert _ascii_query("ITCMD base de calculo") == "ITCMD base de calculo"
+
+    def test_format_date_iso_to_br(self) -> None:
+        assert _format_date("2026-07-05") == "05/07/2026"
+        assert _format_date("2026-07-05T00:00:00Z") == "05/07/2026"
+
+    def test_format_date_passes_through_br_and_unknown(self) -> None:
+        assert _format_date("05/07/2026") == "05/07/2026"  # already BR
+        assert _format_date("") == ""
+
+
+# Mirrors the live API's ``{data, meta, links}`` payload: each decision carries
+# process_number, process_type, rapporteur, adjudicating_body, publication/trial
+# dates, an excerpt/summary and the official tribunal URL.
+_JURISAI_FIXTURE = {
+    "data": [
+        {
+            "process_number": "1002714-69.2022.8.26.0704",
+            "process_type": "Apelação Cível",
+            "rapporteur": "Clara Maria Araújo Xavier",
+            "adjudicating_body": "8ª Câmara de Direito Privado",
+            "publication_date": "2026-07-05",
+            "trial_date": "05/07/2026",
+            "summary": "APELAÇÃO CÍVEL. Reivindicatória. Procedência. Recurso improvido.",
+            "url": "https://esaj.tjsp.jus.br/cjsg/getArquivo.do?cdAcordao=20705474",
+        },
+        {
+            "process_number": "0000000-00.0000.0.00.0000",
+            "process_type": "Agravo",
+            "rapporteur": "",
+            "adjudicating_body": "",
+            "publication_date": "",
+            "trial_date": "",
+            "excerpt": "",  # empty body -> must be skipped
+            "url": None,
+        },
+    ],
+    "meta": {"page": 0, "per_page": 10, "has_next_page": True},
+    "links": {"self": "/api/v1/courts/tjsp/decisions?q=x&page=0"},
+}
+
+
+class TestJurisprudenciasAiParse:
+    """The parser builds a bracketed metadata header + ementa summary, sets
+    ``court`` and puts the official tribunal deep-link in ``full_text_url``.
+    Entries with an empty body are dropped."""
+
+    def test_parses_and_skips_empty(self) -> None:
+        results = JurisprudenciasAiLegalPrecedent._parse_results(
+            _JURISAI_FIXTURE, court_id="tjsp"
+        )
+        # Second entry has empty body -> only one result survives.
+        assert len(results) == 1
+        r = results[0]
+        assert r.summary.startswith("[Processo: 1002714-69.2022.8.26.0704")
+        assert "Relator(a): Clara Maria Araújo Xavier" in r.summary
+        assert "Julgamento: 05/07/2026" in r.summary
+        assert "APELAÇÃO CÍVEL. Reivindicatória" in r.summary
+        assert r.court == "TJSP"
+        assert r.full_text_url is not None
+        assert r.full_text_url.startswith("https://esaj.tjsp.jus.br/")
+
+    def test_falls_back_to_publication_when_no_trial_date(self) -> None:
+        payload = {
+            "data": [{
+                "process_number": "1",
+                "publication_date": "2025-01-02",
+                "trial_date": "",
+                "summary": "Ementa qualquer.",
+            }]
+        }
+        results = JurisprudenciasAiLegalPrecedent._parse_results(payload, "carf")
+        assert "Publicacao: 02/01/2025" in results[0].summary
+        assert results[0].court == "CARF"
+
+    def test_returns_empty_when_no_data(self) -> None:
+        assert JurisprudenciasAiLegalPrecedent._parse_results({"data": []}, "tjrs") == []
+        assert JurisprudenciasAiLegalPrecedent._parse_results({}, "tjrs") == []
 
 
 # ---------------------------------------------------------------------------

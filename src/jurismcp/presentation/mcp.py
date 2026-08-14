@@ -9,6 +9,7 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
 from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.jurisprudencias_ai import JurisprudenciasAiLegalPrecedent
 from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stf import StfLegalPrecedent
 from jurismcp.domain.stj import StjLegalPrecedent
@@ -425,6 +426,62 @@ class LexmlLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class JurisprudenciasAiLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes via Jurisprudencias.ai — fonte ADICIONAL multi-tribunal (opcional).
+
+    Fonte de amplitude complementar, agregadora terceirizada (não é raspagem de portal
+    oficial). Cobre tribunais que as ferramentas dedicadas NÃO alcançam em profundidade —
+    grandes Tribunais de Justiça estaduais (TJSP, TJRS, TJMG, TJPR, TJSC, TJRJ, TJCE, TJGO,
+    TJMA, TJMT), Tribunais Regionais Federais (TRF3, TRF4) e o CARF (matéria fiscal). Use-a
+    para PRECEDENTE PERSUASIVO de fora do ES e para o CARF em temas tributários.
+
+    NÃO cobre o TJES — para o tribunal-casa use a ferramenta dedicada `TjesLegalPrecedentsRequest`.
+
+    IMPORTANTE: esta fonte só funciona quando o servidor tem a variável de ambiente
+    `JURISPRUDENCIAS_AI_TOKEN` configurada (token gerado em jurisprudencias.ai/api-tokens).
+    Sem token, a chamada retorna um erro explicativo e as demais fontes seguem funcionando."""
+
+    court: str = Field(
+        title="Tribunal",
+        description=textwrap.dedent("""
+        Identificador do tribunal a ser pesquisado (obrigatório). Ids disponíveis:
+
+        - Superiores/federais: `stf`, `stj`, `tst`, `trf3`, `trf4`
+        - Administrativo fiscal: `carf`
+        - Tribunais de Justiça estaduais: `tjsp`, `tjrs`, `tjmg`, `tjpr`, `tjsc`,
+          `tjrj`, `tjce`, `tjgo`, `tjma`, `tjmt`
+
+        Escolha o tribunal cuja jurisprudência você quer como precedente persuasivo.
+        Para STF/STJ/TST prefira as ferramentas dedicadas (mais completas); use aqui
+        sobretudo os TJs estaduais e o CARF, que não têm ferramenta própria."""),
+        examples=["tjsp", "tjrs", "tjmg", "carf", "trf4"],
+        min_length=2,
+    )
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+        Termos a serem buscados nas decisões do tribunal escolhido.
+
+        Busca por texto livre. Dica: use 2-4 termos técnicos distintivos. Acentos são
+        removidos automaticamente antes do envio (a busca é acento-insensível), então
+        `usucapião` e `usucapiao` são equivalentes.
+
+        EXEMPLOS:
+        - "usucapiao extraordinaria posse"
+        - "prisao preventiva trafico fundamentacao"
+        - "dano moral consumidor banco"
+        - "ITCMD base de calculo" (com court=carf ou um TJ estadual)"""),
+        min_length=1,
+        examples=[
+            "usucapiao extraordinaria posse",
+            "prisao preventiva trafico fundamentacao",
+            "dano moral consumidor negativacao indevida",
+            "ITCMD base de calculo",
+        ],
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -434,7 +491,8 @@ _TOOLS_AND_MODELS: Final[
             | type[TstLegalPrecedentsRequest]
             | type[StfLegalPrecedentsRequest]
             | type[TjesLegalPrecedentsRequest]
-            | type[LexmlLegalPrecedentsRequest],
+            | type[LexmlLegalPrecedentsRequest]
+            | type[JurisprudenciasAiLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -453,6 +511,7 @@ _TOOLS_AND_MODELS: Final[
         (StfLegalPrecedentsRequest, StfLegalPrecedent),
         (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
         (LexmlLegalPrecedentsRequest, LexmlLegalPrecedent),
+        (JurisprudenciasAiLegalPrecedentsRequest, JurisprudenciasAiLegalPrecedent),
     ]
 ]
 
@@ -480,6 +539,14 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
+    # Extra request fields beyond the common summary/page are forwarded as
+    # keyword arguments to research(). For single-court tools this is empty (they
+    # only define summary+page), so their research signatures are untouched;
+    # multi-court tools (e.g. Jurisprudencias.ai) carry a `court` field that is
+    # passed through here. Keeps the "new HTTP court = no dispatcher change" rule
+    # for single-court sources while supporting parameterized ones.
+    extra = request.model_dump(exclude={"summary", "page"}, exclude_none=True)
+
     # HTTP-based courts (STJ, TJES, LexML, SAJ, TJRS, ...) set
     # requires_browser=False and are called with browser=None; browser-driven
     # courts (STF, TST) launch Chromium. New HTTP courts need no change here.
@@ -489,6 +556,7 @@ async def call_tool(
                 None,  # pyright: ignore[reportArgumentType] — browser not used
                 summary_search_prompt=request.summary,
                 desired_page=request.page,
+                **extra,
             )
         else:
             async with (
@@ -499,6 +567,7 @@ async def call_tool(
                     page,
                     summary_search_prompt=request.summary,
                     desired_page=request.page,
+                    **extra,
                 )
     except Exception as exc:
         _LOGGER.exception("Error calling tool", extra={"tool_name": name})
