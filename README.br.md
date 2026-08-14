@@ -21,6 +21,7 @@ Cada tribunal utiliza o método de acesso mais confiável disponível:
 | **STJ** | HTTP POST direto | `processo.stj.jus.br/SCON/pesquisar.jsp` |
 | **STF** | Browser headless (Chromium) | `portal.stf.jus.br` |
 | **TST** | Browser headless (Chromium) | `jurisprudencia.tst.jus.br` |
+| **BNP/CNJ** (precedentes qualificados, 60+ tribunais) | HTTP POST direto (API REST JSON) | `pangeabnp.pdpj.jus.br/api/v1/precedentes` |
 
 O endpoint do STJ (`processo.stj.jus.br`) serve os mesmos resultados de pesquisa SCON que o
 `scon.stj.jus.br`, porém sem proteção Cloudflare Turnstile, permitindo acesso rápido e confiável
@@ -69,6 +70,12 @@ uv run patchright install
   que atendam aos critérios especificados.
 - `StfLegalPrecedentsRequest`: Pesquisa precedentes judiciais do Supremo Tribunal Federal (STF)
   que atendam aos critérios especificados.
+- `BnpLegalPrecedentsRequest`: Pesquisa **precedentes qualificados** no Banco Nacional de
+  Precedentes do CNJ (BNP) — súmulas, súmulas vinculantes, temas de repercussão geral e
+  repetitivos, IRDR, IAC, IRR, PUIL, OJ e controle concentrado de 60+ tribunais, cada um com a
+  situação viva (Vigente/Afetado/Cancelado/...). Filtros opcionais: `tribunal`, `especie`,
+  `numero` e `incluir_cancelados`. Devolve a TESE fixada (e a questão submetida, quando
+  distinta), não ementas nem inteiros teores. API pública sem autenticação; sem browser.
 
 ### Operadores de Busca
 

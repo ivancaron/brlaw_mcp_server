@@ -28,6 +28,7 @@ Each court uses the most reliable access method available:
 | **TJES** | Direct HTTP GET (REST API) | `sistemas.tjes.jus.br/consulta-jurisprudencia/api/search` |
 | **LexML** (federated) | Direct HTTP GET (HTML scrape) | `lexml.gov.br/busca/search` |
 | **Jurisprudencias.ai** (opt-in, multi-court) | Direct HTTP GET (JSON REST API, token) | `jurisprudencias.ai/api/v1/courts/{court}/decisions` |
+| **BNP/CNJ** (qualified precedents, 60+ courts) | Direct HTTP POST (JSON REST API) | `pangeabnp.pdpj.jus.br/api/v1/precedentes` |
 
 The STJ endpoint (`processo.stj.jus.br`) serves the same SCON search results as
 `scon.stj.jus.br` but without Cloudflare Turnstile protection, enabling fast and
@@ -45,6 +46,16 @@ tool, and use the dedicated tools for depth in a specific court. Records carry
 metadata, the ementa when indexed, and a `urn:lex` resolver link to the official
 full text. The legacy SRU/XML endpoint was decommissioned, so results are scraped
 from the server-rendered UTF-8 HTML of the XTF search; no browser is needed.
+
+**BNP** (Banco Nacional de Precedentes, `bnp.pdpj.jus.br`) is the CNJ's official
+registry of QUALIFIED precedents — súmulas, súmulas vinculantes, repercussão
+geral and repetitive-appeal themes, IRDR/IAC/IRR, PUIL, OJ and abstract
+constitutional review — federating 60+ courts (STF, STJ, TST, STM, TNU, all 27
+state courts, the 6 TRFs and the 24 TRTs). Unlike the other sources it returns
+each precedent's FIXED THESIS and live status (Vigente/Afetado/Cancelado/...),
+not case-law ementas or full texts. The backing REST API is public and
+unauthenticated, but undocumented — the contract was lifted by portal
+inspection (aug/2026).
 
 A new design switch, `BaseLegalPrecedent.requires_browser`, lets the dispatcher
 pick HTTP vs. browser automatically per court, so adding a new HTTP-based court
@@ -109,6 +120,13 @@ uv run patchright install
   scrapers don't reach in depth. It does **not** cover the TJES (use `TjesLegalPrecedentsRequest`
   for the home court). Direct HTTP GET (no browser). The free tier is limited (5 searches/day), so
   it is meant for on-demand persuasive-precedent lookups, not for high-volume parallel search.
+- `BnpLegalPrecedentsRequest`: Research **qualified precedents** in the CNJ's Banco Nacional de
+  Precedentes (BNP) — súmulas, súmulas vinculantes, RG/RR themes, IRDR, IAC, IRR, PUIL, OJ and
+  ADI/ADC/ADO/ADPF from 60+ courts, each with its live status (Vigente/Afetado/Cancelado/...).
+  Optional filters: `tribunal` (BNP sigla, e.g. `STJ`, `TJES`, `trf2`), `especie` (e.g. `SUM`,
+  `RR`, `RG`, `IRDR`), `numero` (exact Tema/Súmula number) and `incluir_cancelados`. Returns the
+  fixed thesis (and the submitted question when distinct), **not** ementas or full texts — use the
+  dedicated court tools or LexML for those. Public unauthenticated REST API; no browser.
 
 ### Response Fields
 
@@ -122,7 +140,7 @@ results may also expose the following optional fields when the source court prov
 | `full_text_url` | `str \| None` | STJ, STF, TST | Absolute URL pointing to the inteiro teor. STJ returns a PDF directly (`/SCON/GetInteiroTeorDoAcordao?...`); STF returns a details page that hosts the PDF; TST returns the closest matching link found within each result block. |
 | `relator_original` | `str \| None` | TJES | Original rapporteur's name when the decision was rendered by a winning dissent — situation in which the TJES API indexes the case by the redator (winning vote) instead of the original relator. |
 | `divergencia_vencedora` | `bool` | TJES | `True` when the decision was rendered by a winning dissent. Defaults to `False`. |
-| `court` | `str \| None` | LexML | Originating court/organ of a federated result, since LexML aggregates many courts in one response. |
+| `court` | `str \| None` | LexML, BNP | Originating court/organ of a federated result, since these sources aggregate many courts in one response. |
 | `urn` | `str \| None` | LexML | The `urn:lex:br:...` identifier of the document; pairs with `full_text_url` (the URN resolver link). |
 
 All optional fields default to `None`/`False` when the court doesn't expose the data, so the change

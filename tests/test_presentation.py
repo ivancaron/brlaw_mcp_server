@@ -3,7 +3,10 @@
 import pytest
 from pydantic import ValidationError
 
-from jurismcp.presentation.mcp import StjLegalPrecedentsRequest
+from jurismcp.presentation.mcp import (
+    BnpLegalPrecedentsRequest,
+    StjLegalPrecedentsRequest,
+)
 
 
 @pytest.mark.asyncio
@@ -40,6 +43,11 @@ async def test_listed_tools() -> None:
             StjLegalPrecedentsRequest.__name__,
             {"summary": "fraude execução"},
             id="valid_tool_call",
+        ),
+        pytest.param(
+            BnpLegalPrecedentsRequest.__name__,
+            {"summary": "fraude execução", "tribunal": "STJ", "especie": "SUM"},
+            id="bnp_extra_fields_passthrough",
         ),
     ],
 )

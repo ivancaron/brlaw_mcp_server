@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.bnp import BnpLegalPrecedent
 from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stf import StfLegalPrecedent
 from jurismcp.domain.stj import StjLegalPrecedent
@@ -76,7 +77,7 @@ async def test_research_legal_precedents(
 )
 @pytest.mark.parametrize(
     "class_",
-    [StjLegalPrecedent, TjesLegalPrecedent, LexmlLegalPrecedent],
+    [StjLegalPrecedent, TjesLegalPrecedent, LexmlLegalPrecedent, BnpLegalPrecedent],
 )
 async def test_research_http_legal_precedents(
     summary: str,

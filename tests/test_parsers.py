@@ -10,6 +10,11 @@ from __future__ import annotations
 
 import textwrap
 
+from jurismcp.domain.bnp import (
+    BnpLegalPrecedent,
+    _normalize_tribunal,
+    _resolve_enunciado,
+)
 from jurismcp.domain.jurisprudencias_ai import (
     JurisprudenciasAiLegalPrecedent,
     _ascii_query,
@@ -569,3 +574,165 @@ class TestPydanticFields:
         d = p.model_dump()
         assert d["full_text_url"].startswith("https://processo.stj.jus.br")
         assert d["full_text"] is None
+
+
+# ---------------------------------------------------------------------------
+# BNP — helpers + `_parse_results` (CNJ qualified-precedent public API)
+# ---------------------------------------------------------------------------
+
+
+class TestBnpResolverEnunciado:
+    """SUM/SV store the enunciado in `questao` with a placeholder `tese`
+    (promote); theme species keep both fields; placebo literals become ''."""
+
+    def test_sum_promotes_questao_to_tese(self) -> None:
+        tese, questao = _resolve_enunciado(
+            "SUM", "não informado", "A fraude à execução depende de registro."
+        )
+        assert tese == "A fraude à execução depende de registro."
+        assert questao is None
+
+    def test_rg_keeps_distinct_tese_and_questao(self) -> None:
+        tese, questao = _resolve_enunciado(
+            "RG", "Tese fixada pelo Plenário.", "Saber se a norma é válida."
+        )
+        assert tese == "Tese fixada pelo Plenário."
+        assert questao == "Saber se a norma é válida."
+
+    def test_rg_does_not_promote_questao(self) -> None:
+        # Outside SUM/SV a placebo thesis stays empty — the submitted
+        # question is NOT the fixed thesis.
+        tese, questao = _resolve_enunciado(
+            "RG", "não informado", "Saber se a norma é válida."
+        )
+        assert tese == ""
+        assert questao == "Saber se a norma é válida."
+
+    def test_placebo_variants_become_empty(self) -> None:
+        for placebo in ("Não informado", "Sem tese", "N/A", "-", ""):
+            assert _resolve_enunciado("ADI", placebo, "")[0] == ""
+
+
+class TestBnpNormalizeTribunal:
+    """LLM-friendly court aliases → BNP siglas. The BNP uses TJDF for the
+    DF court, so the common short name `tjdft` must map to it."""
+
+    def test_trf_and_trt_zero_padding(self) -> None:
+        assert _normalize_tribunal("trf2") == "TRF02"
+        assert _normalize_tribunal("TRF02") == "TRF02"
+        assert _normalize_tribunal("trt1") == "TRT01"
+        assert _normalize_tribunal("trt15") == "TRT15"
+
+    def test_tjdft_alias(self) -> None:
+        assert _normalize_tribunal("tjdft") == "TJDF"
+        assert _normalize_tribunal("TJDFT") == "TJDF"
+
+    def test_plain_siglas_uppercase(self) -> None:
+        assert _normalize_tribunal("tjes") == "TJES"
+        assert _normalize_tribunal("STF") == "STF"
+
+
+# Mirrors the live API's ``{total, resultados}`` payload (contract lifted by
+# inspection, aug/2026; battle-tested by pipeline_PJE's 14.5k-item import).
+_BNP_FIXTURE = {
+    "total": 4,
+    "posicao_inicial": 1,
+    "posicao_final": 4,
+    "aggsEspecies": [{"tipo": "SUM", "total": 1}],
+    "aggsOrgaos": [],
+    "resultados": [
+        {
+            "id": "stj-sum-375",
+            "orgao": "STJ",
+            "tipo": "SUM",
+            "nr": 375,
+            "situacao": "Vigente",
+            "tese": "não informado",
+            "questao": (
+                "<p>O reconhecimento da fraude à execução depende do "
+                "registro da penhora do bem alienado ou da prova de má-fé do "
+                "terceiro adquirente.</p>"
+            ),
+            "historico": [],
+            "processosParadigma": [],
+            "ultimaAtualizacao": "01/04/2025",
+        },
+        {
+            "id": "stf-rg-390",
+            "orgao": "STF",
+            "tipo": "RG",
+            "nr": 390,
+            "situacao": "Mérito Julgado",
+            "tese": "<p>Tese com <b>HTML</b> e entidades &amp; tal.</p>",
+            "questao": "Questão submetida distinta da tese.",
+            "historico": [{"dataCriacao": "2011-01-01T00:00:00.000-03:00"}],
+            "processosParadigma": [
+                {"classe": 429, "numero": "0000000000000000000", "link": ""},
+                {
+                    "classe": 429,
+                    "numero": "1111111111111111111",
+                    "link": "https://portal.stf.jus.br/processos/detalhe.asp?incidente=1",
+                },
+            ],
+            "ultimaAtualizacao": "26/06/2026",
+        },
+        {
+            "id": "stf-adi-5766",
+            "orgao": "STF",
+            "tipo": "ADI",
+            "nr": 5766,
+            "situacao": "Julgado",
+            "tese": "não informado",
+            "questao": "",
+            "historico": [],
+            "processosParadigma": [],
+            "ultimaAtualizacao": "",
+        },
+        {
+            # Malformed: no id, non-numeric nr -> must be discarded.
+            "orgao": "STJ",
+            "tipo": "SUM",
+            "nr": "abc",
+        },
+    ],
+}
+
+
+class TestBnpParseResults:
+    """The parser builds a bracketed metadata header + thesis body, keeps
+    placebo-thesis precedents (existence + status IS information) and drops
+    only truly malformed items."""
+
+    def test_parses_and_drops_malformed(self) -> None:
+        results = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)
+        assert len(results) == 3
+
+    def test_sum_promotes_questao_and_cleans_html(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[0]
+        assert r.summary.startswith(
+            "[Órgão: STJ | Espécie: SUM | Nº: 375 | Situação: Vigente"
+        )
+        assert "Tese: O reconhecimento da fraude à execução" in r.summary
+        assert "<p>" not in r.summary
+        assert "Questão submetida:" not in r.summary  # promoted, not duplicated
+        assert r.court == "STJ"
+        assert r.full_text_url == "https://bnp.pdpj.jus.br/"  # no paradigm link
+
+    def test_rg_shows_both_thesis_and_question_and_paradigm_link(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[1]
+        assert "Tese: Tese com HTML e entidades & tal." in r.summary
+        assert "Questão submetida: Questão submetida distinta da tese." in r.summary
+        assert "Atualização: 26/06/2026" in r.summary
+        # First paradigm has an empty link -> the second one is used.
+        assert r.full_text_url is not None
+        assert r.full_text_url.startswith("https://portal.stf.jus.br/")
+
+    def test_adi_placebo_kept_with_status(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[2]
+        assert "Situação: Julgado" in r.summary
+        assert "Tese: (ainda não publicada no BNP)" in r.summary
+        assert "Atualização:" not in r.summary  # empty date omitted
+
+    def test_returns_empty_when_no_results(self) -> None:
+        assert BnpLegalPrecedent._parse_results({"resultados": []}) == []
+        assert BnpLegalPrecedent._parse_results({}) == []

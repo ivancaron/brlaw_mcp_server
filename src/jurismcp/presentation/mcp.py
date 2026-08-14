@@ -9,6 +9,7 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
 from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.bnp import BnpLegalPrecedent
 from jurismcp.domain.jurisprudencias_ai import JurisprudenciasAiLegalPrecedent
 from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stf import StfLegalPrecedent
@@ -482,6 +483,101 @@ class JurisprudenciasAiLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class BnpLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes QUALIFICADOS no BNP — Banco Nacional de Precedentes do CNJ.
+
+    O BNP (bnp.pdpj.jus.br) é o registro oficial do CNJ dos precedentes qualificados de
+    60+ tribunais: súmulas, súmulas vinculantes, temas de repercussão geral, temas
+    repetitivos, IRDR, IAC, IRR, PUIL, OJ e controle concentrado (ADI/ADC/ADO/ADPF).
+    Cobre STF, STJ, TST, STM, TNU, os 27 Tribunais de Justiça estaduais, os 6 TRFs e os
+    24 TRTs — inclusive tribunais sem ferramenta dedicada neste servidor.
+
+    QUANDO USAR: para localizar/verificar TESE VINCULANTE ou precedente qualificado —
+    "existe tema repetitivo sobre X?", "qual a tese do Tema 1234 do STJ?", "há IRDR
+    sobre isso no TJSP?", "a Súmula N segue vigente?". Cada resultado traz a SITUAÇÃO
+    viva do precedente (Vigente, Afetado, Cancelado, Superado...).
+
+    LIMITAÇÃO honesta: o BNP devolve a TESE FIXADA (e a questão submetida), NÃO a
+    ementa nem o inteiro teor do acórdão. Para acórdãos completos use as ferramentas
+    dedicadas (STJ/STF/TST/TJES) ou o LexML. Alguns precedentes (sobretudo ADI/ADPF e
+    parte dos IRDR) ainda não têm tese publicada no BNP — o resultado indica isso e a
+    situação continua valendo como informação."""
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+            Busca textual livre sobre a tese e a questão submetida dos precedentes
+            (campo `buscaGeral` do BNP). Sem operadores documentados — use 2-4 termos
+            técnicos distintivos. Pode ser vazia ("") quando a pesquisa for por
+            `numero` + `especie` (lookup exato).
+
+            EXEMPLOS:
+            - "honorarios fazenda publica"
+            - "dissolucao irregular redirecionamento"
+            - "juros abusivos taxa media"
+            """),
+        examples=[
+            "fraude execução",
+            "honorários fazenda pública",
+            "prisão preventiva fundamentação",
+        ],
+    )
+
+    tribunal: str = Field(
+        title="Tribunal",
+        description=textwrap.dedent("""
+            Sigla BNP do tribunal (opcional). Vazio = TODOS os tribunais com
+            precedentes (pesquisa federada).
+
+            Principais siglas: `STF`, `STJ`, `TST`, `STM`, `TNU`, `TJES`, `TJSP`,
+            `TJRJ`, `TJMG`, `TJRS`, `TJDF` (aceita `tjdft`), demais TJs (`TJ` + UF),
+            `TRF01`..`TRF06` (aceita `trf1`), `TRT01`..`TRT24` (aceita `trt1`)."""),
+        examples=["STJ", "STF", "TJES", "trf2"],
+        default="",
+    )
+
+    especie: str = Field(
+        title="Espécie do precedente",
+        description=textwrap.dedent("""
+            Sigla da espécie (opcional). Vazio = todas. Legenda:
+
+            - `SUM` = Súmula · `SV` = Súmula Vinculante (STF)
+            - `RG` = Tema de Repercussão Geral (STF) · `RR` = Tema Repetitivo (STJ)
+            - `IRR` = Incidente de Recursos Repetitivos (TST) · `PUIL` = Pedido de
+              Uniformização (TNU)
+            - `IRDR` = Incidente de Resolução de Demandas Repetitivas · `SIRDR` =
+              Suspensão em IRDR · `IAC` = Incidente de Assunção de Competência
+            - `OJ` = Orientação Jurisprudencial · `CT` = Controvérsia · `NT` = Nota
+              Técnica
+            - `ADI`/`ADC`/`ADO`/`ADPF` = controle concentrado (STF)
+
+            Tradução comum: "Tema repetitivo do STJ" → `RR`; "Tema de repercussão
+            geral" → `RG`; "Tema do TST" → `IRR`; "Tema da TNU" → `PUIL`."""),
+        examples=["SUM", "RR", "RG", "IRDR"],
+        default="",
+    )
+
+    numero: str = Field(
+        title="Número do precedente",
+        description=textwrap.dedent("""
+            Número do precedente para lookup exato (opcional) — ex.: "1234" para o
+            Tema 1234, "375" para a Súmula 375. Combine com `especie` (e `tribunal`,
+            para evitar homônimos de outros tribunais). Vazio = sem filtro."""),
+        examples=["1234", "375"],
+        default="",
+    )
+
+    incluir_cancelados: bool = Field(
+        title="Incluir cancelados",
+        description=(
+            "Se True (padrão), precedentes cancelados/superados aparecem com a "
+            "situação marcada — importante para detectar superação de tese. "
+            "False os oculta."
+        ),
+        default=True,
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -492,7 +588,8 @@ _TOOLS_AND_MODELS: Final[
             | type[StfLegalPrecedentsRequest]
             | type[TjesLegalPrecedentsRequest]
             | type[LexmlLegalPrecedentsRequest]
-            | type[JurisprudenciasAiLegalPrecedentsRequest],
+            | type[JurisprudenciasAiLegalPrecedentsRequest]
+            | type[BnpLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -512,6 +609,7 @@ _TOOLS_AND_MODELS: Final[
         (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
         (LexmlLegalPrecedentsRequest, LexmlLegalPrecedent),
         (JurisprudenciasAiLegalPrecedentsRequest, JurisprudenciasAiLegalPrecedent),
+        (BnpLegalPrecedentsRequest, BnpLegalPrecedent),
     ]
 ]
 
