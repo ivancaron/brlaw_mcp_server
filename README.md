@@ -26,6 +26,9 @@ Each court uses the most reliable access method available:
 | **STF** | Headless browser (Chromium) | `jurisprudencia.stf.jus.br` |
 | **TST** | Headless browser (Chromium) | `jurisprudencia.tst.jus.br` |
 | **TJES** | Direct HTTP GET (REST API) | `sistemas.tjes.jus.br/consulta-jurisprudencia/api/search` |
+| **LexML** (federated) | Direct HTTP GET (HTML scrape) | `lexml.gov.br/busca/search` |
+| **Jurisprudencias.ai** (opt-in, multi-court) | Direct HTTP GET (JSON REST API, token) | `jurisprudencias.ai/api/v1/courts/{court}/decisions` |
+| **BNP/CNJ** (qualified precedents, 60+ courts) | Direct HTTP POST (JSON REST API) | `pangeabnp.pdpj.jus.br/api/v1/precedentes` |
 
 The STJ endpoint (`processo.stj.jus.br`) serves the same SCON search results as
 `scon.stj.jus.br` but without Cloudflare Turnstile protection, enabling fast and
@@ -34,6 +37,29 @@ reliable access via direct HTTP requests with proper ISO-8859-1 form encoding.
 The TJES endpoint exposes a public JSON API that returns each ruling's full
 text (`acordao` field) on the same response as the summary, eliminating the
 need for an extra request to obtain the inteiro teor.
+
+**LexML** is the Brazilian government's federated legal-information portal: a
+single query surfaces jurisprudence aggregated from many courts (STF, STJ, TST,
+TSE, STM, the regional federal courts and the state courts of justice). It is the
+breadth source — use it to discover precedents from courts without a dedicated
+tool, and use the dedicated tools for depth in a specific court. Records carry
+metadata, the ementa when indexed, and a `urn:lex` resolver link to the official
+full text. The legacy SRU/XML endpoint was decommissioned, so results are scraped
+from the server-rendered UTF-8 HTML of the XTF search; no browser is needed.
+
+**BNP** (Banco Nacional de Precedentes, `bnp.pdpj.jus.br`) is the CNJ's official
+registry of QUALIFIED precedents — súmulas, súmulas vinculantes, repercussão
+geral and repetitive-appeal themes, IRDR/IAC/IRR, PUIL, OJ and abstract
+constitutional review — federating 60+ courts (STF, STJ, TST, STM, TNU, all 27
+state courts, the 6 TRFs and the 24 TRTs). Unlike the other sources it returns
+each precedent's FIXED THESIS and live status (Vigente/Afetado/Cancelado/...),
+not case-law ementas or full texts. The backing REST API is public and
+unauthenticated, but undocumented — the contract was lifted by portal
+inspection (aug/2026).
+
+A new design switch, `BaseLegalPrecedent.requires_browser`, lets the dispatcher
+pick HTTP vs. browser automatically per court, so adding a new HTTP-based court
+needs no change to the dispatch logic.
 
 ## Requirements
 
@@ -80,6 +106,27 @@ uv run patchright install
   the specified criteria.
 - `TjesLegalPrecedentsRequest`: Research legal precedents made by the Court of Justice of the State
   of Espírito Santo (TJES). Uses TJES public REST API.
+- `LexmlLegalPrecedentsRequest`: Research **federated** jurisprudence aggregated by the LexML portal
+  across many Brazilian courts at once. Best for breadth/discovery; returns metadata, the ementa
+  when indexed, and a `urn:lex` link to the source. Uses a direct HTTP GET (no browser).
+- `JurisprudenciasAiLegalPrecedentsRequest`: **Optional, opt-in** multi-court source backed by the
+  Jurisprudencias.ai REST API (a third-party aggregator, not an official portal). Requires the
+  `JURISPRUDENCIAS_AI_TOKEN` environment variable (a `jur_...` token from
+  [jurisprudencias.ai/api-tokens](https://jurisprudencias.ai/api-tokens)); without it the tool
+  returns a clear error and the other sources keep working. Takes a required `court` id (e.g.
+  `tjsp`, `tjrs`, `tjmg`, `carf`, `trf4`) plus the search terms, and returns the ementa/excerpt,
+  metadata and the official tribunal deep-link in `full_text_url`. Covers state courts (TJSP, TJRS,
+  TJMG, TJPR, TJSC, TJRJ, TJCE, TJGO, TJMA, TJMT), TRF3/TRF4 and **CARF** — courts the dedicated
+  scrapers don't reach in depth. It does **not** cover the TJES (use `TjesLegalPrecedentsRequest`
+  for the home court). Direct HTTP GET (no browser). The free tier is limited (5 searches/day), so
+  it is meant for on-demand persuasive-precedent lookups, not for high-volume parallel search.
+- `BnpLegalPrecedentsRequest`: Research **qualified precedents** in the CNJ's Banco Nacional de
+  Precedentes (BNP) — súmulas, súmulas vinculantes, RG/RR themes, IRDR, IAC, IRR, PUIL, OJ and
+  ADI/ADC/ADO/ADPF from 60+ courts, each with its live status (Vigente/Afetado/Cancelado/...).
+  Optional filters: `tribunal` (BNP sigla, e.g. `STJ`, `TJES`, `trf2`), `especie` (e.g. `SUM`,
+  `RR`, `RG`, `IRDR`), `numero` (exact Tema/Súmula number) and `incluir_cancelados`. Returns the
+  fixed thesis (and the submitted question when distinct), **not** ementas or full texts — use the
+  dedicated court tools or LexML for those. Public unauthenticated REST API; no browser.
 
 ### Response Fields
 
@@ -93,9 +140,11 @@ results may also expose the following optional fields when the source court prov
 | `full_text_url` | `str \| None` | STJ, STF, TST | Absolute URL pointing to the inteiro teor. STJ returns a PDF directly (`/SCON/GetInteiroTeorDoAcordao?...`); STF returns a details page that hosts the PDF; TST returns the closest matching link found within each result block. |
 | `relator_original` | `str \| None` | TJES | Original rapporteur's name when the decision was rendered by a winning dissent — situation in which the TJES API indexes the case by the redator (winning vote) instead of the original relator. |
 | `divergencia_vencedora` | `bool` | TJES | `True` when the decision was rendered by a winning dissent. Defaults to `False`. |
+| `court` | `str \| None` | LexML, BNP | Originating court/organ of a federated result, since these sources aggregate many courts in one response. |
+| `urn` | `str \| None` | LexML | The `urn:lex:br:...` identifier of the document; pairs with `full_text_url` (the URN resolver link). |
 
-All four fields default to `None`/`False` when the court doesn't expose the data, so the change is
-fully backwards compatible — existing consumers that don't read them keep working.
+All optional fields default to `None`/`False` when the court doesn't expose the data, so the change
+is fully backwards compatible — existing consumers that don't read them keep working.
 
 ### Search Operators
 

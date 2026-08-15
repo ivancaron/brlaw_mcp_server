@@ -12,7 +12,7 @@ most relevant for jurisprudence research.
 
 import logging
 import re
-from typing import TYPE_CHECKING, Self, override
+from typing import TYPE_CHECKING, ClassVar, Self, override
 
 import httpx
 
@@ -63,6 +63,60 @@ def _clean_text(text: str) -> str:
     return text.strip()
 
 
+# Portuguese stopwords/connectors that must NOT be promoted to required (+)
+# terms: the Solr analyzer discards them, so "+de"/"+do" would zero out the
+# whole query (confirmed live: "+responsabilidade +do +estado" -> 0 hits).
+_STOPWORDS: frozenset[str] = frozenset({
+    "a", "o", "as", "os", "e", "ou", "de", "da", "do", "das", "dos",
+    "em", "no", "na", "nos", "nas", "um", "uma", "uns", "umas", "ao",
+    "aos", "à", "às", "por", "para", "com", "sem", "que", "se", "ser",
+    "sob", "ante", "the",
+})
+
+# A query is treated as "advanced" (left untouched) when it already carries
+# explicit boolean/grouping/fielded syntax — the caller built it deliberately.
+# The +/- detection only triggers on operators at a token boundary, so
+# hyphenated words ("boia-cross") are not mistaken for advanced syntax.
+_ADVANCED_QUERY_PATTERN = re.compile(
+    r'["()~^*?:]|(?:^|\s)[+\-]\S|\b(?:AND|OR|NOT)\b'
+)
+
+
+def _build_and_query(prompt: str) -> str:
+    """Force AND semantics on the TJES (Solr ``pje2g``) endpoint.
+
+    The core defaults to OR between terms, so a multi-word query such as
+    ``tirolesa acidente responsabilidade`` matches every document containing
+    the common words and never requires the rare one — returning tens of
+    thousands of irrelevant hits ranked by score (confirmed live: 67k+ for
+    that query, none containing "tirolesa"). We rewrite plain queries so each
+    meaningful term is required via the Lucene MUST operator (``+term``),
+    which the endpoint honors (``+turismo +aventura`` -> 1 hit vs 140k+ under
+    OR).
+
+    Stopwords/connectors and 1-char tokens are dropped (not prefixed) because
+    the analyzer discards them and ``+de``/``+do`` would zero the search.
+    Queries that already use quotes, boolean operators or ``+``/``-`` prefixes
+    are considered advanced and returned untouched.
+
+    Trade-off: AND narrows recall — if no single acórdão contains all required
+    terms, the result is (correctly) empty; broaden by removing terms. This is
+    the intended precision gain over the OR flood.
+    """
+    q = (prompt or "").strip()
+    if not q or _ADVANCED_QUERY_PATTERN.search(q):
+        return q
+    required = [
+        tok for tok in q.split()
+        if len(tok) > 1 and tok.casefold() not in _STOPWORDS
+    ]
+    # 0-1 distinctive term: nothing to AND; the single-term OR default already
+    # ranks it correctly (and dropping to "" would broaden, not narrow).
+    if len(required) < 2:
+        return q
+    return " ".join(f"+{tok}" for tok in required)
+
+
 def _detect_winning_dissent(
     acordao_text: str, magistrado_api: str
 ) -> tuple[str | None, bool]:
@@ -95,6 +149,8 @@ def _detect_winning_dissent(
 
 class TjesLegalPrecedent(BaseLegalPrecedent):
     """Model for a legal precedent from the Tribunal de Justica do Espirito Santo (TJES)."""
+
+    requires_browser: ClassVar[bool] = False  # direct HTTP GET to TJES REST API
 
     @classmethod
     def _parse_results(cls, data: dict) -> list[Self]:
@@ -212,9 +268,20 @@ class TjesLegalPrecedent(BaseLegalPrecedent):
             desired_page,
         )
 
+        # The pje2g core defaults to OR between terms; rewrite plain queries to
+        # required-term AND so multi-word searches don't flood with documents
+        # that match only the common words (see _build_and_query).
+        and_query = _build_and_query(summary_search_prompt)
+        if and_query != summary_search_prompt:
+            _LOGGER.debug(
+                "TJES query rewritten for AND semantics: %r -> %r",
+                summary_search_prompt,
+                and_query,
+            )
+
         params = {
             "core": "pje2g",
-            "q": summary_search_prompt,
+            "q": and_query,
             "page": str(desired_page),
             "per_page": str(_RESULTS_PER_PAGE),
         }

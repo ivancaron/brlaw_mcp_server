@@ -9,6 +9,9 @@ from mcp.types import TextContent, Tool
 from pydantic import BaseModel, Field
 
 from jurismcp.domain.base import BaseLegalPrecedent
+from jurismcp.domain.bnp import BnpLegalPrecedent
+from jurismcp.domain.jurisprudencias_ai import JurisprudenciasAiLegalPrecedent
+from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stf import StfLegalPrecedent
 from jurismcp.domain.stj import StjLegalPrecedent
 from jurismcp.domain.tjes import TjesLegalPrecedent
@@ -359,16 +362,19 @@ class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
         Criterios que serao buscados nas decisoes do TJES.
 
         A busca e feita por texto livre no banco de dados de acordaos colegiados do 2o grau.
-        Os termos sao combinados automaticamente (operador AND implicito).
+        Os termos sao combinados com AND: TODOS os termos significativos precisam
+        aparecer no acordao (conectores como "de"/"do"/"e" sao ignorados). Por isso,
+        quanto MAIS termos, MENOS resultados — se vier vazio, remova termos e amplie.
 
         EXEMPLOS:
-        - "dano moral consumidor banco" - busca acordaos sobre dano moral em relacoes bancarias
-        - "habeas corpus prisao preventiva" - busca HC sobre prisao preventiva
-        - "alimentos provisorios" - busca decisoes sobre alimentos
-        - "usucapiao extraordinaria" - busca sobre usucapiao
+        - "dano moral consumidor banco" - acordaos que contenham dano E moral E consumidor E banco
+        - "habeas corpus prisao preventiva" - HC sobre prisao preventiva
+        - "alimentos provisorios" - decisoes sobre alimentos
+        - "usucapiao extraordinaria" - sobre usucapiao
 
-        DICA: use termos tecnicos do direito brasileiro para resultados mais precisos.
-        Evite termos muito genericos que retornam milhares de resultados."""),
+        DICA: comece com 2-3 termos tecnicos distintivos. Para frase exata ou busca
+        avancada, use aspas/operadores ("expressao exata", +obrigatorio, -excluir, AND/OR/NOT)
+        — nesse caso a query e enviada como voce escreveu, sem reescrita automatica."""),
         min_length=1,
         examples=[
             "dano moral consumidor",
@@ -380,6 +386,198 @@ class TjesLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
     )
 
 
+class LexmlLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes judiciais agregados pelo portal LexML (multi-tribunal).
+
+    O LexML (https://www.lexml.gov.br) é a Rede de Informação Legislativa e Jurídica do
+    governo brasileiro. Sua busca de jurisprudência é FEDERADA: agrega acórdãos, súmulas e
+    orientações jurisprudenciais de muitos tribunais (STF, STJ, TST, TSE, STM, TRFs e
+    Tribunais de Justiça estaduais) num único índice.
+
+    Use esta ferramenta quando quiser AMPLITUDE — descobrir precedentes de tribunais que as
+    ferramentas dedicadas (STF, STJ, TST, TJES) não cobrem, ou ter uma visão panorâmica de um
+    tema em várias cortes de uma só vez. Para profundidade num tribunal específico, prefira a
+    ferramenta dedicada daquele tribunal.
+
+    Cada resultado traz metadados (tribunal/órgão de origem, localidade, data), a ementa
+    quando o portal a indexa, e o link resolvedor da URN (urn:lex:br:...) que aponta para o
+    inteiro teor na fonte oficial."""
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+        Termos a serem buscados na jurisprudência federada do LexML.
+
+        A busca é por palavras-chave (texto livre) sobre ementa e metadados, combinadas com
+        operador E implícito. Use termos técnicos do direito brasileiro para resultados mais
+        precisos e evite termos genéricos demais.
+
+        EXEMPLOS:
+        - "alimentos provisórios execução"
+        - "prisão preventiva tráfico fundamentação"
+        - "usucapião extraordinária posse"
+        - "improbidade administrativa dano ao erário" """),
+        min_length=1,
+        examples=[
+            "alimentos provisórios execução",
+            "prisão preventiva tráfico fundamentação",
+            "usucapião extraordinária posse",
+            "improbidade administrativa dano ao erário",
+        ],
+    )
+
+
+class JurisprudenciasAiLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes via Jurisprudencias.ai — fonte ADICIONAL multi-tribunal (opcional).
+
+    Fonte de amplitude complementar, agregadora terceirizada (não é raspagem de portal
+    oficial). Cobre tribunais que as ferramentas dedicadas NÃO alcançam em profundidade —
+    grandes Tribunais de Justiça estaduais (TJSP, TJRS, TJMG, TJPR, TJSC, TJRJ, TJCE, TJGO,
+    TJMA, TJMT), Tribunais Regionais Federais (TRF3, TRF4) e o CARF (matéria fiscal). Use-a
+    para PRECEDENTE PERSUASIVO de fora do ES e para o CARF em temas tributários.
+
+    NÃO cobre o TJES — para o tribunal-casa use a ferramenta dedicada `TjesLegalPrecedentsRequest`.
+
+    IMPORTANTE: esta fonte só funciona quando o servidor tem a variável de ambiente
+    `JURISPRUDENCIAS_AI_TOKEN` configurada (token gerado em jurisprudencias.ai/api-tokens).
+    Sem token, a chamada retorna um erro explicativo e as demais fontes seguem funcionando."""
+
+    court: str = Field(
+        title="Tribunal",
+        description=textwrap.dedent("""
+        Identificador do tribunal a ser pesquisado (obrigatório). Ids disponíveis:
+
+        - Superiores/federais: `stf`, `stj`, `tst`, `trf3`, `trf4`
+        - Administrativo fiscal: `carf`
+        - Tribunais de Justiça estaduais: `tjsp`, `tjrs`, `tjmg`, `tjpr`, `tjsc`,
+          `tjrj`, `tjce`, `tjgo`, `tjma`, `tjmt`
+
+        Escolha o tribunal cuja jurisprudência você quer como precedente persuasivo.
+        Para STF/STJ/TST prefira as ferramentas dedicadas (mais completas); use aqui
+        sobretudo os TJs estaduais e o CARF, que não têm ferramenta própria."""),
+        examples=["tjsp", "tjrs", "tjmg", "carf", "trf4"],
+        min_length=2,
+    )
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+        Termos a serem buscados nas decisões do tribunal escolhido.
+
+        Busca por texto livre. Dica: use 2-4 termos técnicos distintivos. Acentos são
+        removidos automaticamente antes do envio (a busca é acento-insensível), então
+        `usucapião` e `usucapiao` são equivalentes.
+
+        EXEMPLOS:
+        - "usucapiao extraordinaria posse"
+        - "prisao preventiva trafico fundamentacao"
+        - "dano moral consumidor banco"
+        - "ITCMD base de calculo" (com court=carf ou um TJ estadual)"""),
+        min_length=1,
+        examples=[
+            "usucapiao extraordinaria posse",
+            "prisao preventiva trafico fundamentacao",
+            "dano moral consumidor negativacao indevida",
+            "ITCMD base de calculo",
+        ],
+    )
+
+
+class BnpLegalPrecedentsRequest(BaseLegalPrecedentsRequest):
+    """Requisição de precedentes QUALIFICADOS no BNP — Banco Nacional de Precedentes do CNJ.
+
+    O BNP (bnp.pdpj.jus.br) é o registro oficial do CNJ dos precedentes qualificados de
+    60+ tribunais: súmulas, súmulas vinculantes, temas de repercussão geral, temas
+    repetitivos, IRDR, IAC, IRR, PUIL, OJ e controle concentrado (ADI/ADC/ADO/ADPF).
+    Cobre STF, STJ, TST, STM, TNU, os 27 Tribunais de Justiça estaduais, os 6 TRFs e os
+    24 TRTs — inclusive tribunais sem ferramenta dedicada neste servidor.
+
+    QUANDO USAR: para localizar/verificar TESE VINCULANTE ou precedente qualificado —
+    "existe tema repetitivo sobre X?", "qual a tese do Tema 1234 do STJ?", "há IRDR
+    sobre isso no TJSP?", "a Súmula N segue vigente?". Cada resultado traz a SITUAÇÃO
+    viva do precedente (Vigente, Afetado, Cancelado, Superado...).
+
+    LIMITAÇÃO honesta: o BNP devolve a TESE FIXADA (e a questão submetida), NÃO a
+    ementa nem o inteiro teor do acórdão. Para acórdãos completos use as ferramentas
+    dedicadas (STJ/STF/TST/TJES) ou o LexML. Alguns precedentes (sobretudo ADI/ADPF e
+    parte dos IRDR) ainda não têm tese publicada no BNP — o resultado indica isso e a
+    situação continua valendo como informação."""
+
+    summary: str = Field(
+        title="Termos de busca",
+        description=textwrap.dedent("""
+            Busca textual livre sobre a tese e a questão submetida dos precedentes
+            (campo `buscaGeral` do BNP). Sem operadores documentados — use 2-4 termos
+            técnicos distintivos. Pode ser vazia ("") quando a pesquisa for por
+            `numero` + `especie` (lookup exato).
+
+            EXEMPLOS:
+            - "honorarios fazenda publica"
+            - "dissolucao irregular redirecionamento"
+            - "juros abusivos taxa media"
+            """),
+        examples=[
+            "fraude execução",
+            "honorários fazenda pública",
+            "prisão preventiva fundamentação",
+        ],
+    )
+
+    tribunal: str = Field(
+        title="Tribunal",
+        description=textwrap.dedent("""
+            Sigla BNP do tribunal (opcional). Vazio = TODOS os tribunais com
+            precedentes (pesquisa federada).
+
+            Principais siglas: `STF`, `STJ`, `TST`, `STM`, `TNU`, `TJES`, `TJSP`,
+            `TJRJ`, `TJMG`, `TJRS`, `TJDF` (aceita `tjdft`), demais TJs (`TJ` + UF),
+            `TRF01`..`TRF06` (aceita `trf1`), `TRT01`..`TRT24` (aceita `trt1`)."""),
+        examples=["STJ", "STF", "TJES", "trf2"],
+        default="",
+    )
+
+    especie: str = Field(
+        title="Espécie do precedente",
+        description=textwrap.dedent("""
+            Sigla da espécie (opcional). Vazio = todas. Legenda:
+
+            - `SUM` = Súmula · `SV` = Súmula Vinculante (STF)
+            - `RG` = Tema de Repercussão Geral (STF) · `RR` = Tema Repetitivo (STJ)
+            - `IRR` = Incidente de Recursos Repetitivos (TST) · `PUIL` = Pedido de
+              Uniformização (TNU)
+            - `IRDR` = Incidente de Resolução de Demandas Repetitivas · `SIRDR` =
+              Suspensão em IRDR · `IAC` = Incidente de Assunção de Competência
+            - `OJ` = Orientação Jurisprudencial · `CT` = Controvérsia · `NT` = Nota
+              Técnica
+            - `ADI`/`ADC`/`ADO`/`ADPF` = controle concentrado (STF)
+
+            Tradução comum: "Tema repetitivo do STJ" → `RR`; "Tema de repercussão
+            geral" → `RG`; "Tema do TST" → `IRR`; "Tema da TNU" → `PUIL`."""),
+        examples=["SUM", "RR", "RG", "IRDR"],
+        default="",
+    )
+
+    numero: str = Field(
+        title="Número do precedente",
+        description=textwrap.dedent("""
+            Número do precedente para lookup exato (opcional) — ex.: "1234" para o
+            Tema 1234, "375" para a Súmula 375. Combine com `especie` (e `tribunal`,
+            para evitar homônimos de outros tribunais). Vazio = sem filtro."""),
+        examples=["1234", "375"],
+        default="",
+    )
+
+    incluir_cancelados: bool = Field(
+        title="Incluir cancelados",
+        description=(
+            "Se True (padrão), precedentes cancelados/superados aparecem com a "
+            "situação marcada — importante para detectar superação de tese. "
+            "False os oculta."
+        ),
+        default=True,
+    )
+
+
 _TOOLS_AND_MODELS: Final[
     list[
         tuple[
@@ -388,7 +586,10 @@ _TOOLS_AND_MODELS: Final[
             type[StjLegalPrecedentsRequest]
             | type[TstLegalPrecedentsRequest]
             | type[StfLegalPrecedentsRequest]
-            | type[TjesLegalPrecedentsRequest],
+            | type[TjesLegalPrecedentsRequest]
+            | type[LexmlLegalPrecedentsRequest]
+            | type[JurisprudenciasAiLegalPrecedentsRequest]
+            | type[BnpLegalPrecedentsRequest],
         ]
     ]
 ] = [
@@ -406,6 +607,9 @@ _TOOLS_AND_MODELS: Final[
         (TstLegalPrecedentsRequest, TstLegalPrecedent),
         (StfLegalPrecedentsRequest, StfLegalPrecedent),
         (TjesLegalPrecedentsRequest, TjesLegalPrecedent),
+        (LexmlLegalPrecedentsRequest, LexmlLegalPrecedent),
+        (JurisprudenciasAiLegalPrecedentsRequest, JurisprudenciasAiLegalPrecedent),
+        (BnpLegalPrecedentsRequest, BnpLegalPrecedent),
     ]
 ]
 
@@ -433,15 +637,24 @@ async def call_tool(
     else:
         raise ValueError(f"Tool {name} not found")
 
-    # STJ and TJES use direct HTTP (no browser needed); other courts use browser
+    # Extra request fields beyond the common summary/page are forwarded as
+    # keyword arguments to research(). For single-court tools this is empty (they
+    # only define summary+page), so their research signatures are untouched;
+    # multi-court tools (e.g. Jurisprudencias.ai) carry a `court` field that is
+    # passed through here. Keeps the "new HTTP court = no dispatcher change" rule
+    # for single-court sources while supporting parameterized ones.
+    extra = request.model_dump(exclude={"summary", "page"}, exclude_none=True)
+
+    # HTTP-based courts (STJ, TJES, LexML, SAJ, TJRS, ...) set
+    # requires_browser=False and are called with browser=None; browser-driven
+    # courts (STF, TST) launch Chromium. New HTTP courts need no change here.
     try:
-        if domain_model is StjLegalPrecedent or domain_model is TjesLegalPrecedent:
-            # STJ bypasses Cloudflare via processo.stj.jus.br HTTP POST
-            # TJES uses REST API at sistemas.tjes.jus.br HTTP GET
+        if not domain_model.requires_browser:
             precedents = await method(
                 None,  # pyright: ignore[reportArgumentType] — browser not used
                 summary_search_prompt=request.summary,
                 desired_page=request.page,
+                **extra,
             )
         else:
             async with (
@@ -452,6 +665,7 @@ async def call_tool(
                     page,
                     summary_search_prompt=request.summary,
                     desired_page=request.page,
+                    **extra,
                 )
     except Exception as exc:
         _LOGGER.exception("Error calling tool", extra={"tool_name": name})

@@ -10,11 +10,65 @@ from __future__ import annotations
 
 import textwrap
 
+from jurismcp.domain.bnp import (
+    BnpLegalPrecedent,
+    _normalize_tribunal,
+    _resolve_enunciado,
+)
+from jurismcp.domain.jurisprudencias_ai import (
+    JurisprudenciasAiLegalPrecedent,
+    _ascii_query,
+    _format_date,
+)
+from jurismcp.domain.lexml import LexmlLegalPrecedent
 from jurismcp.domain.stj import _STJ_BASE, StjLegalPrecedent
 from jurismcp.domain.tjes import (
     TjesLegalPrecedent,
+    _build_and_query,
     _detect_winning_dissent,
 )
+
+# ---------------------------------------------------------------------------
+# TJES — `_build_and_query` (AND semantics fix)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildAndQuery:
+    """The pje2g core defaults to OR; plain multi-word queries must be
+    rewritten to required-term AND (+term) so they don't flood with documents
+    matching only the common words."""
+
+    def test_plain_multiword_becomes_required_terms(self) -> None:
+        assert (
+            _build_and_query("turismo de aventura responsabilidade")
+            == "+turismo +aventura +responsabilidade"
+        )
+
+    def test_stopwords_and_connectors_are_dropped(self) -> None:
+        # "de" must NOT become "+de" (analyzer drops it -> would zero the search)
+        out = _build_and_query("responsabilidade do estado")
+        assert out == "+responsabilidade +estado"
+        assert "+do" not in out
+
+    def test_single_distinctive_term_left_untouched(self) -> None:
+        # Nothing to AND; single-term OR already ranks correctly.
+        assert _build_and_query("tirolesa") == "tirolesa"
+
+    def test_quoted_phrase_is_advanced_and_untouched(self) -> None:
+        q = '"turismo de aventura"'
+        assert _build_and_query(q) == q
+
+    def test_explicit_operators_left_untouched(self) -> None:
+        assert _build_and_query("dano AND moral") == "dano AND moral"
+        assert _build_and_query("+rafting acidente") == "+rafting acidente"
+        assert _build_and_query("turismo -aventura") == "turismo -aventura"
+
+    def test_hyphenated_word_is_not_mistaken_for_operator(self) -> None:
+        # "boia-cross" must not trip the +/- advanced detector.
+        assert _build_and_query("boia-cross acidente") == "+boia-cross +acidente"
+
+    def test_empty_query_returns_empty(self) -> None:
+        assert _build_and_query("   ") == ""
 
 # ---------------------------------------------------------------------------
 # TJES — `_detect_winning_dissent`
@@ -309,6 +363,184 @@ class TestStjModernTemplateParser:
 
 
 # ---------------------------------------------------------------------------
+# LexML — `_parse_results` (federated XTF HTML search)
+# ---------------------------------------------------------------------------
+
+
+# Mirrors the live LexML XTF markup: each result is a
+# <div id="main_N" class="docHit"><table> with label/value rows across
+# <td class="col2"><b>LABEL</b></td><td class="col3">VALUE</td> cells.
+# Labels carry trailing non-breaking spaces (&#160;) and the ementa carries
+# <span class="hit"> highlight markup — both must be cleaned away.
+_LEXML_FIXTURE = textwrap.dedent(
+    """\
+    <html><body>
+    <td class="docHit"><div id="main_1" class="docHit"><table>
+      <tr><td class="col1"><b>1</b></td><td class="col2"><b>Localidade&#160;&#160;</b></td><td class="col3">Distrito Federal</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Autoridade&#160;&#160;</b></td><td class="col3">Tribunal de Justiça do Distrito Federal e dos Territórios. 5ª Turma Cível</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Título&#160;&#160;</b></td><td class="col3"><a href="/urn/urn:lex:br;distrito.federal:tribunal.justica.distrito.federal.territorios;turma.civel.5:acordao:2009-11-04;394803">Acórdão nº 394803 do Processo nº20060110390196apc</a>&#160;</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Data&#160;&#160;</b></td><td class="col3">04/11/2009</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Ementa&#160;&#160;</b></td><td class="col3">CIVIL. EXECUÇÃO DE <span class="hit">ALIMENTOS</span> PROVISÓRIOS. POSSIBILIDADE.</td><td class="col4"> </td></tr>
+    </table></div></td>
+    <td class="docHit"><div id="main_2" class="docHit"><table>
+      <tr><td class="col1"><b>2</b></td><td class="col2"><b>Localidade&#160;&#160;</b></td><td class="col3">Federal</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Autoridade&#160;&#160;</b></td><td class="col3">Superior Tribunal de Justiça</td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Título&#160;&#160;</b></td><td class="col3"><a href="/urn/urn:lex:br:superior.tribunal.justica:acordao:2020-05-12;1896526">REsp 1896526</a></td><td class="col4"> </td></tr>
+      <tr><td class="col1"> </td><td class="col2"><b>Data&#160;&#160;</b></td><td class="col3">12/05/2020</td><td class="col4"> </td></tr>
+    </table></div></td>
+    </body></html>
+    """
+)
+
+
+class TestLexmlParseResults:
+    """LexML federates jurisprudence from many courts. Records expose
+    metadata (localidade, autoridade, título, data) plus an ementa when
+    indexed, and a URN link to the source. The parser builds a metadata
+    header + body summary, and fills ``court``/``urn``/``full_text_url``."""
+
+    def test_parses_two_federated_results(self) -> None:
+        results = LexmlLegalPrecedent._parse_results(_LEXML_FIXTURE)
+        assert len(results) == 2
+
+        first, second = results
+
+        # First: TJDFT, with ementa
+        assert first.court == (
+            "Tribunal de Justiça do Distrito Federal e dos Territórios. "
+            "5ª Turma Cível"
+        )
+        assert "Tribunal/Órgão:" in first.summary
+        assert "Data: 04/11/2009" in first.summary
+        assert "Acórdão nº 394803" in first.summary
+        # ementa cleaned: highlight span unwrapped, kept text
+        assert "EXECUÇÃO DE ALIMENTOS PROVISÓRIOS" in first.summary
+        assert "<span" not in first.summary
+        # urn + resolver link
+        assert first.urn == (
+            "urn:lex:br;distrito.federal:tribunal.justica.distrito.federal."
+            "territorios;turma.civel.5:acordao:2009-11-04;394803"
+        )
+        assert first.full_text_url == f"https://www.lexml.gov.br/urn/{first.urn}"
+
+        # Second: STJ, no ementa row — summary still built from título + meta
+        assert second.court == "Superior Tribunal de Justiça"
+        assert "REsp 1896526" in second.summary
+        assert second.urn is not None
+        assert second.urn.startswith("urn:lex:br:superior.tribunal.justica")
+
+    def test_label_nbsp_is_normalized(self) -> None:
+        """Trailing &#160; on labels must not break field-key matching."""
+        results = LexmlLegalPrecedent._parse_results(_LEXML_FIXTURE)
+        # If labels weren't normalized, court/data would be missing.
+        assert all(r.court for r in results)
+
+    def test_returns_empty_when_no_dochit_blocks(self) -> None:
+        html = (
+            "<html><body><div class='results'>"
+            "Nenhum documento encontrado</div></body></html>"
+        )
+        assert LexmlLegalPrecedent._parse_results(html) == []
+
+
+# ---------------------------------------------------------------------------
+# Jurisprudencias.ai — helpers + `_parse_results` (token-gated multi-court API)
+# ---------------------------------------------------------------------------
+
+
+class TestJurisprudenciasAiHelpers:
+    """The WAF rejects accented queries (400); we fold to ASCII before sending
+    (the provider's search is accent-insensitive). Dates arrive ISO or BR."""
+
+    def test_ascii_query_strips_accents(self) -> None:
+        assert _ascii_query("tráfico privilegiado") == "trafico privilegiado"
+        assert _ascii_query("usucapião extraordinária") == "usucapiao extraordinaria"
+
+    def test_ascii_query_collapses_whitespace(self) -> None:
+        assert _ascii_query("  dano   moral  ") == "dano moral"
+
+    def test_ascii_query_keeps_plain_ascii(self) -> None:
+        assert _ascii_query("ITCMD base de calculo") == "ITCMD base de calculo"
+
+    def test_format_date_iso_to_br(self) -> None:
+        assert _format_date("2026-07-05") == "05/07/2026"
+        assert _format_date("2026-07-05T00:00:00Z") == "05/07/2026"
+
+    def test_format_date_passes_through_br_and_unknown(self) -> None:
+        assert _format_date("05/07/2026") == "05/07/2026"  # already BR
+        assert _format_date("") == ""
+
+
+# Mirrors the live API's ``{data, meta, links}`` payload: each decision carries
+# process_number, process_type, rapporteur, adjudicating_body, publication/trial
+# dates, an excerpt/summary and the official tribunal URL.
+_JURISAI_FIXTURE = {
+    "data": [
+        {
+            "process_number": "1002714-69.2022.8.26.0704",
+            "process_type": "Apelação Cível",
+            "rapporteur": "Clara Maria Araújo Xavier",
+            "adjudicating_body": "8ª Câmara de Direito Privado",
+            "publication_date": "2026-07-05",
+            "trial_date": "05/07/2026",
+            "summary": "APELAÇÃO CÍVEL. Reivindicatória. Procedência. Recurso improvido.",
+            "url": "https://esaj.tjsp.jus.br/cjsg/getArquivo.do?cdAcordao=20705474",
+        },
+        {
+            "process_number": "0000000-00.0000.0.00.0000",
+            "process_type": "Agravo",
+            "rapporteur": "",
+            "adjudicating_body": "",
+            "publication_date": "",
+            "trial_date": "",
+            "excerpt": "",  # empty body -> must be skipped
+            "url": None,
+        },
+    ],
+    "meta": {"page": 0, "per_page": 10, "has_next_page": True},
+    "links": {"self": "/api/v1/courts/tjsp/decisions?q=x&page=0"},
+}
+
+
+class TestJurisprudenciasAiParse:
+    """The parser builds a bracketed metadata header + ementa summary, sets
+    ``court`` and puts the official tribunal deep-link in ``full_text_url``.
+    Entries with an empty body are dropped."""
+
+    def test_parses_and_skips_empty(self) -> None:
+        results = JurisprudenciasAiLegalPrecedent._parse_results(
+            _JURISAI_FIXTURE, court_id="tjsp"
+        )
+        # Second entry has empty body -> only one result survives.
+        assert len(results) == 1
+        r = results[0]
+        assert r.summary.startswith("[Processo: 1002714-69.2022.8.26.0704")
+        assert "Relator(a): Clara Maria Araújo Xavier" in r.summary
+        assert "Julgamento: 05/07/2026" in r.summary
+        assert "APELAÇÃO CÍVEL. Reivindicatória" in r.summary
+        assert r.court == "TJSP"
+        assert r.full_text_url is not None
+        assert r.full_text_url.startswith("https://esaj.tjsp.jus.br/")
+
+    def test_falls_back_to_publication_when_no_trial_date(self) -> None:
+        payload = {
+            "data": [{
+                "process_number": "1",
+                "publication_date": "2025-01-02",
+                "trial_date": "",
+                "summary": "Ementa qualquer.",
+            }]
+        }
+        results = JurisprudenciasAiLegalPrecedent._parse_results(payload, "carf")
+        assert "Publicacao: 02/01/2025" in results[0].summary
+        assert results[0].court == "CARF"
+
+    def test_returns_empty_when_no_data(self) -> None:
+        assert JurisprudenciasAiLegalPrecedent._parse_results({"data": []}, "tjrs") == []
+        assert JurisprudenciasAiLegalPrecedent._parse_results({}, "tjrs") == []
+
+
+# ---------------------------------------------------------------------------
 # Pydantic model — new fields are optional and serialise correctly
 # ---------------------------------------------------------------------------
 
@@ -342,3 +574,165 @@ class TestPydanticFields:
         d = p.model_dump()
         assert d["full_text_url"].startswith("https://processo.stj.jus.br")
         assert d["full_text"] is None
+
+
+# ---------------------------------------------------------------------------
+# BNP — helpers + `_parse_results` (CNJ qualified-precedent public API)
+# ---------------------------------------------------------------------------
+
+
+class TestBnpResolverEnunciado:
+    """SUM/SV store the enunciado in `questao` with a placeholder `tese`
+    (promote); theme species keep both fields; placebo literals become ''."""
+
+    def test_sum_promotes_questao_to_tese(self) -> None:
+        tese, questao = _resolve_enunciado(
+            "SUM", "não informado", "A fraude à execução depende de registro."
+        )
+        assert tese == "A fraude à execução depende de registro."
+        assert questao is None
+
+    def test_rg_keeps_distinct_tese_and_questao(self) -> None:
+        tese, questao = _resolve_enunciado(
+            "RG", "Tese fixada pelo Plenário.", "Saber se a norma é válida."
+        )
+        assert tese == "Tese fixada pelo Plenário."
+        assert questao == "Saber se a norma é válida."
+
+    def test_rg_does_not_promote_questao(self) -> None:
+        # Outside SUM/SV a placebo thesis stays empty — the submitted
+        # question is NOT the fixed thesis.
+        tese, questao = _resolve_enunciado(
+            "RG", "não informado", "Saber se a norma é válida."
+        )
+        assert tese == ""
+        assert questao == "Saber se a norma é válida."
+
+    def test_placebo_variants_become_empty(self) -> None:
+        for placebo in ("Não informado", "Sem tese", "N/A", "-", ""):
+            assert _resolve_enunciado("ADI", placebo, "")[0] == ""
+
+
+class TestBnpNormalizeTribunal:
+    """LLM-friendly court aliases → BNP siglas. The BNP uses TJDF for the
+    DF court, so the common short name `tjdft` must map to it."""
+
+    def test_trf_and_trt_zero_padding(self) -> None:
+        assert _normalize_tribunal("trf2") == "TRF02"
+        assert _normalize_tribunal("TRF02") == "TRF02"
+        assert _normalize_tribunal("trt1") == "TRT01"
+        assert _normalize_tribunal("trt15") == "TRT15"
+
+    def test_tjdft_alias(self) -> None:
+        assert _normalize_tribunal("tjdft") == "TJDF"
+        assert _normalize_tribunal("TJDFT") == "TJDF"
+
+    def test_plain_siglas_uppercase(self) -> None:
+        assert _normalize_tribunal("tjes") == "TJES"
+        assert _normalize_tribunal("STF") == "STF"
+
+
+# Mirrors the live API's ``{total, resultados}`` payload (contract lifted by
+# inspection, aug/2026; battle-tested by pipeline_PJE's 14.5k-item import).
+_BNP_FIXTURE = {
+    "total": 4,
+    "posicao_inicial": 1,
+    "posicao_final": 4,
+    "aggsEspecies": [{"tipo": "SUM", "total": 1}],
+    "aggsOrgaos": [],
+    "resultados": [
+        {
+            "id": "stj-sum-375",
+            "orgao": "STJ",
+            "tipo": "SUM",
+            "nr": 375,
+            "situacao": "Vigente",
+            "tese": "não informado",
+            "questao": (
+                "<p>O reconhecimento da fraude à execução depende do "
+                "registro da penhora do bem alienado ou da prova de má-fé do "
+                "terceiro adquirente.</p>"
+            ),
+            "historico": [],
+            "processosParadigma": [],
+            "ultimaAtualizacao": "01/04/2025",
+        },
+        {
+            "id": "stf-rg-390",
+            "orgao": "STF",
+            "tipo": "RG",
+            "nr": 390,
+            "situacao": "Mérito Julgado",
+            "tese": "<p>Tese com <b>HTML</b> e entidades &amp; tal.</p>",
+            "questao": "Questão submetida distinta da tese.",
+            "historico": [{"dataCriacao": "2011-01-01T00:00:00.000-03:00"}],
+            "processosParadigma": [
+                {"classe": 429, "numero": "0000000000000000000", "link": ""},
+                {
+                    "classe": 429,
+                    "numero": "1111111111111111111",
+                    "link": "https://portal.stf.jus.br/processos/detalhe.asp?incidente=1",
+                },
+            ],
+            "ultimaAtualizacao": "26/06/2026",
+        },
+        {
+            "id": "stf-adi-5766",
+            "orgao": "STF",
+            "tipo": "ADI",
+            "nr": 5766,
+            "situacao": "Julgado",
+            "tese": "não informado",
+            "questao": "",
+            "historico": [],
+            "processosParadigma": [],
+            "ultimaAtualizacao": "",
+        },
+        {
+            # Malformed: no id, non-numeric nr -> must be discarded.
+            "orgao": "STJ",
+            "tipo": "SUM",
+            "nr": "abc",
+        },
+    ],
+}
+
+
+class TestBnpParseResults:
+    """The parser builds a bracketed metadata header + thesis body, keeps
+    placebo-thesis precedents (existence + status IS information) and drops
+    only truly malformed items."""
+
+    def test_parses_and_drops_malformed(self) -> None:
+        results = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)
+        assert len(results) == 3
+
+    def test_sum_promotes_questao_and_cleans_html(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[0]
+        assert r.summary.startswith(
+            "[Órgão: STJ | Espécie: SUM | Nº: 375 | Situação: Vigente"
+        )
+        assert "Tese: O reconhecimento da fraude à execução" in r.summary
+        assert "<p>" not in r.summary
+        assert "Questão submetida:" not in r.summary  # promoted, not duplicated
+        assert r.court == "STJ"
+        assert r.full_text_url == "https://bnp.pdpj.jus.br/"  # no paradigm link
+
+    def test_rg_shows_both_thesis_and_question_and_paradigm_link(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[1]
+        assert "Tese: Tese com HTML e entidades & tal." in r.summary
+        assert "Questão submetida: Questão submetida distinta da tese." in r.summary
+        assert "Atualização: 26/06/2026" in r.summary
+        # First paradigm has an empty link -> the second one is used.
+        assert r.full_text_url is not None
+        assert r.full_text_url.startswith("https://portal.stf.jus.br/")
+
+    def test_adi_placebo_kept_with_status(self) -> None:
+        r = BnpLegalPrecedent._parse_results(_BNP_FIXTURE)[2]
+        assert "Situação: Julgado" in r.summary
+        assert "Tese: (ainda não publicada no BNP)" in r.summary
+        assert "Atualização:" not in r.summary  # empty date omitted
+
+    def test_returns_empty_when_no_results(self) -> None:
+        assert BnpLegalPrecedent._parse_results({"resultados": []}) == []
+        assert BnpLegalPrecedent._parse_results({}) == []

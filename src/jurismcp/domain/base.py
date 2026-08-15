@@ -4,7 +4,7 @@ This module contains the base classes and utilities used by the legal precedents
 domain models, including validation and common fields."""
 
 import textwrap
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, ClassVar, Self
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -16,6 +16,16 @@ if TYPE_CHECKING:
 
 class BaseLegalPrecedent(BaseModel):
     """Base class for legal precedents."""
+
+    requires_browser: ClassVar[bool] = True
+    """Whether ``research`` needs a Patchright browser page.
+
+    Defaults to ``True`` (browser-driven scraping, e.g. STF/TST). Subclasses
+    that hit an HTTP/JSON/HTML endpoint directly (STJ, TJES, LexML, SAJ,
+    TJRS, ...) override this to ``False`` so the MCP dispatcher passes
+    ``browser=None`` and skips launching Chromium. This is the single switch
+    the dispatcher in ``presentation/mcp.py`` reads to decide HTTP vs browser,
+    so new HTTP-based courts need no change there."""
 
     summary: str = Field(
         title="Ementa",
@@ -101,6 +111,29 @@ class BaseLegalPrecedent(BaseModel):
         ),
     )
     """True when the decision was rendered by a winning dissent."""
+
+    court: str | None = Field(
+        default=None,
+        title="Tribunal/Órgão",
+        description=(
+            "Sigla ou nome do tribunal/órgão de origem da decisão. Útil em "
+            "fontes federadas (ex.: LexML) que agregam decisões de múltiplos "
+            "tribunais numa mesma resposta. None quando a ferramenta já é "
+            "específica de um único tribunal (o nome consta no próprio nome da tool)."
+        ),
+    )
+    """The originating court/organ, useful for federated sources (e.g. LexML)."""
+
+    urn: str | None = Field(
+        default=None,
+        title="URN LexML",
+        description=(
+            "URN no padrão LexML (urn:lex:br:...) identificando unicamente o "
+            "documento jurídico. Presente apenas em resultados do LexML; None "
+            "nas demais fontes."
+        ),
+    )
+    """The LexML URN (urn:lex:br:...) identifying the document, when available."""
 
     @field_validator("summary")
     @classmethod
